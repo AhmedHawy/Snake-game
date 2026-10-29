@@ -42,7 +42,11 @@ jobs:
           java-version: 21
           cache: gradle
 
+      # Accepts SDK licenses. The default package list includes the obsolete
+      # 'tools' package, which newer sdkmanager versions no longer provide.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - run: npm ci
 

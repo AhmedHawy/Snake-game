@@ -23,6 +23,23 @@ export interface ZonePalette {
   accent: string;
 }
 
+/** 3D lighting for a zone (hemisphere sky/ground colors and intensities). */
+export interface ZoneLight {
+  sky: string;
+  ground: string;
+  hemi: number;
+  sun: number;
+}
+
+export type DecorKind =
+  | 'flower' | 'mushroom' | 'grass'
+  | 'pebble' | 'dune' | 'skull'
+  | 'shell' | 'starfish' | 'seaweed'
+  | 'snowMound' | 'crystal' | 'pine'
+  | 'ember' | 'darkRock'
+  | 'neonTile' | 'neonPyramid'
+  | 'crater' | 'spaceCrystal';
+
 export interface ZoneConfig {
   id: string;
   /** i18n key for the zone name. */
@@ -35,6 +52,11 @@ export interface ZoneConfig {
   obstacleStyle: ObstacleStyle;
   /** Obstacle piece shapes as cell offsets (randomly rotated when placed). */
   obstacleShapes: Vec[][];
+  light: ZoneLight;
+  /** Small non-blocking 3D ground decorations. */
+  decor: DecorKind[];
+  /** Decorations per 16x16 chunk. */
+  decorPerChunk: number;
 }
 
 /** Foods (apples + golden apples) needed to advance to the next zone. */
@@ -58,6 +80,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'grass', ambient: 'leaves', ambientCount: 18,
     obstacleStyle: 'rock', obstacleShapes: [SINGLE, PAIR, SQUARE],
+    light: { sky: '#eaffd8', ground: '#3d6b2a', hemi: 1.6, sun: 2.2 },
+    decor: ['flower', 'mushroom', 'grass'], decorPerChunk: 26,
   },
   {
     id: 'desert',
@@ -69,6 +93,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'dunes', ambient: 'sand', ambientCount: 45,
     obstacleStyle: 'cactus', obstacleShapes: [SINGLE, PAIR, ELL],
+    light: { sky: '#fff1d0', ground: '#8a5a2b', hemi: 1.6, sun: 2.4 },
+    decor: ['pebble', 'dune', 'skull'], decorPerChunk: 18,
   },
   {
     id: 'ocean',
@@ -80,6 +106,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'waves', ambient: 'bubbles', ambientCount: 26,
     obstacleStyle: 'coral', obstacleShapes: [SINGLE, ELL, TEE],
+    light: { sky: '#9fe8ff', ground: '#06324a', hemi: 1.4, sun: 1.6 },
+    decor: ['shell', 'starfish', 'seaweed'], decorPerChunk: 22,
   },
   {
     id: 'snow',
@@ -91,6 +119,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'frost', ambient: 'snow', ambientCount: 55,
     obstacleStyle: 'ice', obstacleShapes: [SINGLE, PAIR, SQUARE, LINE3],
+    light: { sky: '#ffffff', ground: '#7fa8c8', hemi: 1.5, sun: 1.8 },
+    decor: ['snowMound', 'crystal', 'pine'], decorPerChunk: 20,
   },
   {
     id: 'volcano',
@@ -102,6 +132,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'cracks', ambient: 'embers', ambientCount: 40,
     obstacleStyle: 'lava', obstacleShapes: [SINGLE, PAIR, ELL, SQUARE],
+    light: { sky: '#ffb38a', ground: '#2a0804', hemi: 0.9, sun: 1.2 },
+    decor: ['ember', 'darkRock'], decorPerChunk: 22,
   },
   {
     id: 'neon',
@@ -113,6 +145,8 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'grid', ambient: 'neon', ambientCount: 14,
     obstacleStyle: 'neon', obstacleShapes: [PAIR, LINE3, ELL],
+    light: { sky: '#a58cff', ground: '#05010f', hemi: 0.8, sun: 0.7 },
+    decor: ['neonTile', 'neonPyramid'], decorPerChunk: 18,
   },
   {
     id: 'space',
@@ -124,5 +158,7 @@ export const ZONES: ZoneConfig[] = [
     },
     pattern: 'starfield', ambient: 'stars', ambientCount: 60,
     obstacleStyle: 'asteroid', obstacleShapes: [SINGLE, SINGLE, SQUARE],
+    light: { sky: '#c9d3ff', ground: '#000004', hemi: 0.9, sun: 1.3 },
+    decor: ['crater', 'spaceCrystal'], decorPerChunk: 16,
   },
 ];

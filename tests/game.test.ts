@@ -6,7 +6,7 @@ import { FOODS_PER_ZONE } from '../src/config/zones';
 import { Game, type FoodItem } from '../src/core/state';
 
 const make = (over: Partial<ConstructorParameters<typeof Game>[0]> = {}) =>
-  new Game({ cols: 17, rows: 30, mode: MODES.classic, difficulty: DIFFICULTIES.normal, seed: 42, ...over });
+  new Game({ mode: MODES.classic, difficulty: DIFFICULTIES.normal, seed: 42, ...over });
 
 /** Runs the simulation until exactly one more step has happened. */
 function stepOnce(g: Game): void {
@@ -73,16 +73,27 @@ describe('Game basics', () => {
     expect(g.snake.length).toBe(len + 1);
   });
 
-  it('crashes into solid walls but wraps on easy', () => {
+  it('has no walls: the snake can travel far in any direction', () => {
     const g = make({ mode: { ...MODES.classic, obstacles: false } });
     g.begin();
-    for (let i = 0; i < 100 && g.status === 'playing'; i++) stepOnce(g);
-    expect(g.status).toBe('dying');
+    for (let i = 0; i < 300; i++) stepOnce(g);
+    expect(g.status).toBe('playing');
+    expect(g.head.y).toBeLessThan(-250);
+    g.steer(3);
+    for (let i = 0; i < 300; i++) stepOnce(g);
+    expect(g.status).toBe('playing');
+    expect(g.head.x).toBeLessThan(-250);
+  });
 
-    const e = make({ difficulty: DIFFICULTIES.easy });
-    e.begin();
-    for (let i = 0; i < 100; i++) stepOnce(e);
-    expect(e.status).toBe('playing');
+  it('crashes into obstacles', () => {
+    const g = make({ difficulty: DIFFICULTIES.hard });
+    g.begin();
+    // Find an obstacle and drive the snake straight into it.
+    const o = g.world.cells()[0];
+    g.setSnake([{ x: o.x, y: o.y + 1 }, { x: o.x, y: o.y + 2 }, { x: o.x, y: o.y + 3 }]);
+    g.dir = 0;
+    stepOnce(g);
+    expect(g.status).toBe('dying');
   });
 
   it('dies when biting itself unless ghost is active', () => {
@@ -189,7 +200,7 @@ describe('Game basics', () => {
       for (let i = 0; i < 20; i++) g.spawnFood('apple');
       for (const f of g.foods) {
         expect(g.snake.some((s) => s.x === f.pos.x && s.y === f.pos.y)).toBe(false);
-        expect(g.blocked.get(f.pos.x, f.pos.y)).toBe(false);
+        expect(g.isBlocked(f.pos.x, f.pos.y)).toBe(false);
         expect(g.isPortal(f.pos.x, f.pos.y)).toBe(false);
       }
     }

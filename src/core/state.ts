@@ -1,5 +1,8 @@
 // Core game simulation. Pure logic: no DOM, no rendering. The app drains
 // `events` every frame to drive effects, audio and haptics.
+//
+// The world is unbounded (no walls): obstacles are generated in chunks around
+// the snake, and food, portals and moving obstacles are kept near it.
 import type { DifficultyConfig } from '../config/difficulty';
 import {
   FOODS,
@@ -16,7 +19,7 @@ import {
 import { MODES, PORTAL_COLORS, type ModeConfig } from '../config/modes';
 import { FOODS_PER_ZONE, ZONES, type ZoneConfig } from '../config/zones';
 import { Rng } from './rng';
-import { CellMask, buildForbiddenMask, generateObstacles, randomFreeCell, type BoardSpec } from './spawn';
+import { CHUNK, ObstacleWorld, cellKey, randomCellNear } from './spawn';
 import { DIRS, chebyshev, isOpposite, manhattan, type Dir, type Vec } from './types';
 
 export interface FoodItem {
@@ -31,6 +34,7 @@ export interface FoodItem {
 }
 
 export interface Mover {
+  id: number;
   pos: Vec;
   prev: Vec;
   dir: Dir;
@@ -58,13 +62,13 @@ export type GameEvent =
   | { type: 'spawn'; food: FoodItem };
 
 export interface GameOptions {
-  cols: number;
-  rows: number;
   mode: ModeConfig;
   difficulty: DifficultyConfig;
   seed?: number;
   zones?: ZoneConfig[];
   startLength?: number;
+  /** Roughly half the number of cells visible on screen (spawn distances scale with it). */
+  viewRadius?: number;
 }
 
 export const TIMED_EFFECTS: TimedEffect[] = ['speed', 'slow', 'ghost', 'magnet'];
@@ -73,32 +77,34 @@ const ABSOLUTE_MIN_STEP_MS = 28;
 /** Moving obstacles advance once every N snake steps. */
 export const MOVER_EVERY = 2;
 const MAX_QUEUE = 3;
+/** Radius around the head (Chebyshev) where obstacles never appear. */
+export const HEAD_SAFE_RADIUS = 4;
+/** Cells straight ahead of the head that obstacles never appear on. */
+export const HEAD_SAFE_AHEAD = 8;
+/** Chunks generated around the head in every direction. */
+export const CHUNK_RADIUS = 3;
 
 export class Game {
-  readonly cols: number;
-  readonly rows: number;
   readonly mode: ModeConfig;
   readonly diff: DifficultyConfig;
-  readonly wrap: boolean;
   readonly zones: ZoneConfig[];
   readonly rng: Rng;
-  private readonly spec: BoardSpec;
+  readonly viewRadius: number;
+  readonly world: ObstacleWorld;
 
   snake: Vec[] = [];
   /** Snake cells before the last step, index-aligned with `snake`. */
   prevSnake: Vec[] = [];
-  dir: Dir;
+  dir: Dir = 0;
   /** Direction used for the previous step (for rendering the head turn). */
-  prevDir: Dir;
+  prevDir: Dir = 0;
   queue: Dir[] = [];
   pendingGrow = 0;
   /** The head went through a portal on the last step. */
   teleported = false;
 
-  obstacles: Vec[] = [];
-  /** Previous zone's obstacles, kept for the crossfade. */
+  /** Obstacles of the previous zone, kept for the crossfade. */
   oldObstacles: Vec[] = [];
-  readonly blocked: CellMask;
   movers: Mover[] = [];
   foods: FoodItem[] = [];
   portals: Portal[] = [];
@@ -121,32 +127,24 @@ export class Game {
   crashAt: Vec | null = null;
   events: GameEvent[] = [];
   private nextId = 1;
+  private snakeCells = new Map<number, number>();
 
   constructor(opts: GameOptions) {
-    this.cols = opts.cols;
-    this.rows = opts.rows;
     this.mode = opts.mode;
     this.diff = opts.difficulty;
     this.zones = opts.zones ?? ZONES;
-    this.wrap = this.diff.wrapWalls || this.mode.noDeath;
     this.rng = new Rng(opts.seed);
-    this.spec = { cols: this.cols, rows: this.rows, wrap: this.wrap };
-    this.blocked = new CellMask(this.cols, this.rows);
+    this.viewRadius = Math.max(5, Math.round(opts.viewRadius ?? 8));
     this.timeLeftMs = this.mode.timeLimitMs;
+    this.world = new ObstacleWorld(this.rng, this.zone.obstacleShapes, this.mode.obstacles ? this.diff.obstaclesPerChunk : 0);
 
-    // Start in the middle, heading along the long axis.
-    this.dir = this.rows >= this.cols ? 0 : 1;
-    this.prevDir = this.dir;
     const len = opts.startLength ?? 4;
-    const d = DIRS[this.dir];
-    const cx = Math.floor(this.cols / 2);
-    const cy = this.rows >= this.cols ? Math.floor(this.rows * 0.6) : Math.floor(this.rows / 2);
-    const startX = this.rows >= this.cols ? cx : Math.floor(this.cols * 0.4);
-    for (let i = 0; i < len; i++) this.snake.push({ x: startX - d.x * i, y: cy - d.y * i });
+    for (let i = 0; i < len; i++) this.snake.push({ x: 0, y: i });
     this.prevSnake = this.snake.map((p) => ({ ...p }));
+    this.indexSnake();
 
     this.placePortals();
-    this.buildObstacles();
+    this.refreshWorld();
     this.ensureApple();
     this.events.length = 0;
   }
@@ -176,6 +174,10 @@ export class Game {
 
   get anyEffectActive(): boolean {
     return TIMED_EFFECTS.some((e) => this.effects[e] > 0);
+  }
+
+  isBlocked(x: number, y: number): boolean {
+    return this.world.has(x, y);
   }
 
   /** Queue a turn. Same-direction and 180° turns (relative to the last queued move) are ignored. */
@@ -252,12 +254,6 @@ export class Game {
     let nx = head.x + d.x;
     let ny = head.y + d.y;
 
-    if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) {
-      if (!this.wrap) return this.crash(head);
-      nx = (nx + this.cols) % this.cols;
-      ny = (ny + this.rows) % this.rows;
-    }
-
     let teleported = false;
     const exit = this.portalExit(nx, ny);
     if (exit) {
@@ -267,21 +263,24 @@ export class Game {
       teleported = true;
     }
 
-    if (this.blocked.get(nx, ny) || this.moverAt(nx, ny)) return this.crash({ x: nx, y: ny });
+    if (this.isBlocked(nx, ny) || this.moverAt(nx, ny)) return this.crash({ x: nx, y: ny });
 
     if (this.effects.ghost <= 0 && !this.mode.noDeath) {
       // The tail cell frees up this step unless the snake is growing.
-      const len = this.snake.length - (this.pendingGrow > 0 ? 0 : 1);
-      for (let i = 0; i < len; i++) {
-        const s = this.snake[i];
-        if (s.x === nx && s.y === ny) return this.crash({ x: nx, y: ny });
-      }
+      const tail = this.snake[this.snake.length - 1];
+      const hit = this.snakeCells.get(cellKey(nx, ny)) ?? 0;
+      const tailFrees = this.pendingGrow === 0 && tail.x === nx && tail.y === ny && hit === 1;
+      if (hit > 0 && !tailFrees) return this.crash({ x: nx, y: ny });
     }
 
     this.prevSnake = this.snake.map((p) => ({ x: p.x, y: p.y }));
     this.snake.unshift({ x: nx, y: ny });
+    this.addCell(nx, ny);
     if (this.pendingGrow > 0) this.pendingGrow--;
-    else this.snake.pop();
+    else {
+      const t = this.snake.pop()!;
+      this.removeCell(t.x, t.y);
+    }
     this.teleported = teleported;
 
     for (const f of this.foods) {
@@ -298,6 +297,8 @@ export class Game {
 
     if (this.effects.magnet > 0) this.pullFood();
     this.stepMovers();
+    if (this.stepCount % 4 === 0) this.refreshWorld();
+    this.keepNearby();
     this.ensureApple();
   }
 
@@ -355,7 +356,7 @@ export class Game {
       // Combo window: distance to the nearest apple plus some slack.
       const apple = this.foods.find((f) => f.type === 'apple');
       const dist = apple ? manhattan(this.head, apple.pos) : 0;
-      const slack = Math.round((this.cols + this.rows) * this.diff.comboSlackFactor);
+      const slack = Math.round(this.viewRadius * 5 * this.diff.comboSlackFactor);
       this.comboWindow = Math.max(4, dist + slack);
       this.comboStepsLeft = this.comboWindow;
     }
@@ -366,6 +367,7 @@ export class Game {
     const n = Math.min(count, removable);
     this.pendingGrow = 0;
     const removed = n > 0 ? this.snake.splice(this.snake.length - n, n) : [];
+    for (const r of removed) this.removeCell(r.x, r.y);
     this.prevSnake.length = Math.min(this.prevSnake.length, this.snake.length);
     this.events.push({ type: 'shrink', removed, poison });
   }
@@ -376,75 +378,91 @@ export class Game {
       this.zoneIndex = 0;
       this.loop++;
     }
-    this.oldObstacles = this.obstacles;
-    this.buildObstacles();
-    // Relocate anything now sitting on an obstacle.
+    this.oldObstacles = this.world.cells().map((c) => ({ x: c.x, y: c.y }));
+    this.world.clear();
+    this.world.setShapes(this.zone.obstacleShapes);
+    this.movers = [];
+    this.refreshWorld();
+    this.events.push({ type: 'zone', zoneIndex: this.zoneIndex, loop: this.loop });
+  }
+
+  // ------------------------------------------------------------ world upkeep
+
+  /** Cells where new obstacles may not appear: around the snake, the head, the path ahead, portals and food. */
+  private forbidden = (x: number, y: number): boolean => {
+    const head = this.head;
+    if (Math.abs(x - head.x) <= HEAD_SAFE_RADIUS && Math.abs(y - head.y) <= HEAD_SAFE_RADIUS) return true;
+    const d = DIRS[this.dir];
+    for (let k = 1; k <= HEAD_SAFE_AHEAD; k++) {
+      const cx = head.x + d.x * k;
+      const cy = head.y + d.y * k;
+      if (Math.abs(x - cx) <= 1 && Math.abs(y - cy) <= 1) return true;
+    }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (this.snakeCells.has(cellKey(x + dx, y + dy))) return true;
+    for (const p of this.portals) if (chebyshev(p.a, { x, y }) <= 1 || chebyshev(p.b, { x, y }) <= 1) return true;
+    for (const f of this.foods) if (f.pos.x === x && f.pos.y === y) return true;
+    for (const m of this.movers) if (m.pos.x === x && m.pos.y === y) return true;
+    return false;
+  };
+
+  /** Generates obstacle chunks around the head, drops far ones, and keeps movers populated. */
+  private refreshWorld(): void {
+    const h = this.head;
+    this.world.update(h.x, h.y, CHUNK_RADIUS, this.forbidden);
+
+    if (!this.mode.obstacles) return;
+    const wanted = this.diff.movingObstacles;
+    const far = this.viewRadius * 3;
+    this.movers = this.movers.filter((m) => chebyshev(m.pos, h) <= far);
+    while (this.movers.length < wanted) {
+      const c = randomCellNear(h, this.viewRadius + 1, this.viewRadius * 2, this.rng, (x, y) => !this.forbidden(x, y) && !this.isBlocked(x, y));
+      if (!c) break;
+      this.movers.push({ id: this.nextId++, pos: c, prev: { ...c }, dir: this.rng.int(4) as Dir });
+    }
+  }
+
+  /** Food and portals that fall far behind are brought back near the snake. */
+  private keepNearby(): void {
+    const h = this.head;
+    const far = this.viewRadius * 3;
     for (const f of this.foods) {
-      if (this.blocked.get(f.pos.x, f.pos.y)) {
-        const c = this.freeCell();
+      if (chebyshev(f.pos, h) > far) {
+        const c = this.freeCell(3, this.viewRadius);
         if (c) {
           f.pos = c;
           f.prev = { ...c };
         }
       }
     }
-    this.events.push({ type: 'zone', zoneIndex: this.zoneIndex, loop: this.loop });
-  }
-
-  // ------------------------------------------------------------ world setup
-
-  private buildObstacles(): void {
-    this.blocked.clear();
-    this.obstacles = [];
-    this.movers = [];
-    if (!this.mode.obstacles) return;
-    const reserved = this.portals.flatMap((p) => [p.a, p.b]);
-    const pieces = this.diff.obstaclePieces > 0 ? this.diff.obstaclePieces + Math.min(3, this.loop) : 0;
-    this.obstacles = generateObstacles({
-      spec: this.spec,
-      pieces,
-      shapes: this.zone.obstacleShapes,
-      snake: this.snake,
-      dir: this.dir,
-      reserved,
-      rng: this.rng,
-    });
-    for (const o of this.obstacles) this.blocked.set(o.x, o.y);
-
-    if (this.diff.movingObstacles > 0) {
-      const forbidden = buildForbiddenMask(this.spec, this.snake, this.dir, reserved);
-      for (let i = 0; i < this.diff.movingObstacles; i++) {
-        const c = randomFreeCell(
-          this.spec,
-          this.rng,
-          (x, y) => !forbidden.get(x, y) && !this.blocked.get(x, y) && !this.moverAt(x, y) && !this.foodAt(x, y),
-        );
-        if (!c) break;
-        this.movers.push({ pos: c, prev: { ...c }, dir: this.rng.int(4) as Dir });
+    for (let i = 0; i < this.portals.length; i++) {
+      const p = this.portals[i];
+      if (chebyshev(p.a, h) > far && chebyshev(p.b, h) > far) {
+        const pair = this.makePortalPair(p.color);
+        if (pair) this.portals[i] = pair;
       }
     }
   }
 
   private placePortals(): void {
-    const pairs = this.mode.portalPairs;
-    if (pairs <= 0) return;
-    const forbidden = buildForbiddenMask(this.spec, this.snake, this.dir, []);
-    const taken: Vec[] = [];
-    const ok = (x: number, y: number) =>
-      x >= 2 && y >= 2 && x < this.cols - 2 && y < this.rows - 2 && !forbidden.get(x, y) && taken.every((t) => chebyshev(t, { x, y }) >= 3);
-    const minApart = Math.floor((this.cols + this.rows) / 3);
-    for (let i = 0; i < pairs; i++) {
-      const a = randomFreeCell(this.spec, this.rng, ok);
-      if (!a) break;
-      taken.push(a);
-      const b = randomFreeCell(this.spec, this.rng, (x, y) => ok(x, y) && manhattan(a, { x, y }) >= minApart) ?? randomFreeCell(this.spec, this.rng, ok);
-      if (!b) {
-        taken.pop();
-        break;
-      }
-      taken.push(b);
-      this.portals.push({ a, b, color: PORTAL_COLORS[i % PORTAL_COLORS.length] });
+    for (let i = 0; i < this.mode.portalPairs; i++) {
+      const pair = this.makePortalPair(PORTAL_COLORS[i % PORTAL_COLORS.length]);
+      if (pair) this.portals.push(pair);
     }
+  }
+
+  private makePortalPair(color: string): Portal | null {
+    const others = this.portals.flatMap((p) => (p.color === color ? [] : [p.a, p.b]));
+    const ok = (x: number, y: number) => {
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (this.isBlocked(x + dx, y + dy)) return false;
+      if (this.snakeCells.has(cellKey(x, y)) || this.foodAt(x, y)) return false;
+      return others.every((o) => chebyshev(o, { x, y }) >= 3);
+    };
+    const r = this.viewRadius;
+    const a = randomCellNear(this.head, 4, r, this.rng, ok);
+    if (!a) return null;
+    const b = randomCellNear(this.head, 4, Math.round(r * 1.6), this.rng, (x, y) => ok(x, y) && manhattan(a, { x, y }) >= r);
+    if (!b) return null;
+    return { a, b, color };
   }
 
   // ------------------------------------------------------------------ food
@@ -465,7 +483,7 @@ export class Game {
   }
 
   spawnFood(type: FoodType): FoodItem | null {
-    const c = this.freeCell();
+    const c = this.freeCell(3, this.viewRadius);
     if (!c) return null;
     const cfg = FOODS[type];
     const life =
@@ -489,20 +507,14 @@ export class Game {
     return food;
   }
 
-  private freeCell(): Vec | null {
-    const snakeMask = new CellMask(this.cols, this.rows);
-    for (const s of this.snake) snakeMask.set(s.x, s.y);
-    const head = this.head;
-    return randomFreeCell(
-      this.spec,
-      this.rng,
-      (x, y) =>
-        !snakeMask.get(x, y) &&
-        !this.blocked.get(x, y) &&
-        !this.isPortal(x, y) &&
-        !this.foodAt(x, y) &&
-        !this.moverAt(x, y) &&
-        Math.max(Math.abs(x - head.x), Math.abs(y - head.y)) >= 2,
+  private isFree(x: number, y: number): boolean {
+    return !this.snakeCells.has(cellKey(x, y)) && !this.isBlocked(x, y) && !this.isPortal(x, y) && !this.foodAt(x, y) && !this.moverAt(x, y);
+  }
+
+  private freeCell(minD: number, maxD: number): Vec | null {
+    return (
+      randomCellNear(this.head, minD, maxD, this.rng, (x, y) => this.isFree(x, y)) ??
+      randomCellNear(this.head, 2, maxD * 2, this.rng, (x, y) => this.isFree(x, y))
     );
   }
 
@@ -523,8 +535,7 @@ export class Game {
         const tx = f.pos.x + o.x;
         const ty = f.pos.y + o.y;
         if (tx === head.x && ty === head.y) break;
-        if (this.blocked.get(tx, ty) || this.isPortal(tx, ty) || this.foodAt(tx, ty) || this.moverAt(tx, ty)) continue;
-        if (this.snake.some((s) => s.x === tx && s.y === ty)) continue;
+        if (!this.isFree(tx, ty)) continue;
         f.pos = { x: tx, y: ty };
         break;
       }
@@ -543,13 +554,12 @@ export class Game {
         const tx = m.pos.x + d.x;
         const ty = m.pos.y + d.y;
         const blocked =
-          !this.blocked.inside(tx, ty) ||
-          this.blocked.get(tx, ty) ||
+          this.isBlocked(tx, ty) ||
           this.isPortal(tx, ty) ||
-          this.foodAt(tx, ty) ||
+          !!this.foodAt(tx, ty) ||
           this.movers.some((o) => o !== m && o.pos.x === tx && o.pos.y === ty) ||
           chebyshev({ x: tx, y: ty }, this.head) <= 1 ||
-          this.snake.some((s) => s.x === tx && s.y === ty);
+          this.snakeCells.has(cellKey(tx, ty));
         if (!blocked) {
           m.pos = { x: tx, y: ty };
           break;
@@ -560,6 +570,34 @@ export class Game {
   }
 
   // --------------------------------------------------------------- queries
+
+  private indexSnake(): void {
+    this.snakeCells.clear();
+    for (const s of this.snake) this.addCell(s.x, s.y);
+  }
+
+  private addCell(x: number, y: number): void {
+    const k = cellKey(x, y);
+    this.snakeCells.set(k, (this.snakeCells.get(k) ?? 0) + 1);
+  }
+
+  private removeCell(x: number, y: number): void {
+    const k = cellKey(x, y);
+    const n = (this.snakeCells.get(k) ?? 0) - 1;
+    if (n <= 0) this.snakeCells.delete(k);
+    else this.snakeCells.set(k, n);
+  }
+
+  /** Replaces the snake body (tests / debugging). */
+  setSnake(cells: Vec[]): void {
+    this.snake = cells.map((c) => ({ ...c }));
+    this.prevSnake = this.snake.map((c) => ({ ...c }));
+    this.indexSnake();
+  }
+
+  onSnake(x: number, y: number): boolean {
+    return this.snakeCells.has(cellKey(x, y));
+  }
 
   foodAt(x: number, y: number): FoodItem | undefined {
     for (const f of this.foods) if (f.pos.x === x && f.pos.y === y) return f;
@@ -585,12 +623,8 @@ export class Game {
   }
 }
 
-export function createGame(
-  cols: number,
-  rows: number,
-  modeId: keyof typeof MODES,
-  difficulty: DifficultyConfig,
-  seed?: number,
-): Game {
-  return new Game({ cols, rows, mode: MODES[modeId], difficulty, seed });
+export function createGame(modeId: keyof typeof MODES, difficulty: DifficultyConfig, seed?: number): Game {
+  return new Game({ mode: MODES[modeId], difficulty, seed });
 }
+
+export { CHUNK };

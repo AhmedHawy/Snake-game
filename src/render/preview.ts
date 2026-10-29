@@ -33,6 +33,19 @@ export function drawSkinPreview(canvas: HTMLCanvasElement, skin: SkinConfig, tim
       ctx.stroke();
     }
   }
+  if (skin.dragon) {
+    // Back spines.
+    ctx.fillStyle = skin.dragon.spine;
+    for (let i = 2; i < n; i += 2) {
+      const [x, y] = pts[i];
+      const rr = r * (1 - 0.35 * (i / n));
+      ctx.beginPath();
+      ctx.moveTo(x - rr * 0.5, y - rr * 0.7);
+      ctx.lineTo(x, y - rr * 1.6);
+      ctx.lineTo(x + rr * 0.5, y - rr * 0.7);
+      ctx.fill();
+    }
+  }
   const [hx, hy] = pts[0];
   ctx.fillStyle = skin.outline;
   ctx.beginPath();
@@ -42,6 +55,17 @@ export function drawSkinPreview(canvas: HTMLCanvasElement, skin: SkinConfig, tim
   ctx.beginPath();
   ctx.arc(hx, hy, r * 1.15, 0, Math.PI * 2);
   ctx.fill();
+  if (skin.dragon) {
+    // Horns.
+    ctx.fillStyle = skin.dragon.horn;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(hx - r * 0.2, hy + s * r * 0.7);
+      ctx.lineTo(hx - r * 1.5, hy + s * r * 1.45);
+      ctx.lineTo(hx + r * 0.2, hy + s * r * 1.0);
+      ctx.fill();
+    }
+  }
   for (const s of [-1, 1]) {
     ctx.fillStyle = skin.eyeWhite;
     ctx.beginPath();

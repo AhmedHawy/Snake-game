@@ -1,6 +1,7 @@
 // localStorage persistence for settings and high scores. Every access is
 // wrapped so the game still works when storage is unavailable.
 import type { DifficultyId } from '../config/difficulty';
+import type { BoardSize } from '../core/grid';
 import type { Lang } from '../config/i18n';
 import type { ModeId } from '../config/modes';
 import type { SkinId } from '../config/skins';
@@ -16,6 +17,8 @@ export interface Settings {
   dpadSide: 'left' | 'right';
   mode: ModeId;
   difficulty: DifficultyId;
+  /** Zoom: how big cells look on screen. */
+  boardSize: BoardSize;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dpadSide: 'right',
   mode: 'classic',
   difficulty: 'normal',
+  boardSize: 'large',
 };
 
 const SETTINGS_KEY = 'snakerush.settings.v1';

@@ -23,6 +23,7 @@ describe('storage', () => {
     expect(s.muted).toBe(true);
     expect(s.lang).toBe('en');
     expect(s.skin).toBe('neon');
+    expect(s.boardSize).toBe('large');
     kv.setItem('snakerush.settings.v1', JSON.stringify({ volume: 'loud', haptics: 'yes' }));
     expect(loadSettings(kv).volume).toBe(DEFAULT_SETTINGS.volume);
     expect(loadSettings(kv).haptics).toBe(DEFAULT_SETTINGS.haptics);

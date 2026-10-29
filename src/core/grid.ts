@@ -1,9 +1,6 @@
-// Responsive board layout: pick grid dimensions for a run and fit the board
-// into the available screen space without stretching.
+// Responsive layout: splits the screen into HUD, play area and D-pad area,
+// and maps the zoom setting to how many cells are visible.
 
-/** Cells along the short side of the board. */
-export const PHONE_SHORT_CELLS = 17;
-export const TABLET_SHORT_CELLS = 21;
 /** Screens whose short side exceeds this (CSS px) are treated as tablets. */
 export const TABLET_MIN_SHORT_SIDE = 600;
 
@@ -81,30 +78,13 @@ export function computeLayout(input: LayoutInput): BoardLayout {
   return { area: { x, y, w: Math.max(0, w), h: Math.max(0, h) }, dpadRect, dpadBeside };
 }
 
-/**
- * Chooses grid dimensions for a new run so that the short side has ~17 cells
- * on phones (~21 on tablets) and the long side gets as many square cells as fit.
- */
-export function chooseGridDims(area: Rect, tablet: boolean): { cols: number; rows: number } {
-  const shortCells = tablet ? TABLET_SHORT_CELLS : PHONE_SHORT_CELLS;
-  const shortSide = Math.min(area.w, area.h);
-  const longSide = Math.max(area.w, area.h);
-  if (shortSide <= 0) return { cols: shortCells, rows: shortCells };
-  const cell = shortSide / shortCells;
-  const longCells = Math.max(shortCells, Math.floor(longSide / cell));
-  return area.w >= area.h ? { cols: longCells, rows: shortCells } : { cols: shortCells, rows: longCells };
-}
+export type BoardSize = 'small' | 'normal' | 'large';
 
 /**
- * Fits a cols x rows board into the area, centered, with square cells snapped
- * to whole device pixels so grid lines stay crisp.
+ * Cells visible across the short side of the view for the zoom setting.
+ * "large" means big cells (closest camera); tablets show a few more cells.
  */
-export function fitBoard(area: Rect, cols: number, rows: number, dpr: number): Rect & { cell: number } {
-  const raw = Math.min(area.w / cols, area.h / rows);
-  const cell = Math.max(4 / dpr, Math.floor(raw * dpr) / dpr);
-  const w = cell * cols;
-  const h = cell * rows;
-  const x = Math.round((area.x + (area.w - w) / 2) * dpr) / dpr;
-  const y = Math.round((area.y + (area.h - h) / 2) * dpr) / dpr;
-  return { x, y, w, h, cell };
+export function visibleShortCells(size: BoardSize, tablet: boolean): number {
+  const phone = { large: 11, normal: 15, small: 19 }[size] ?? 11;
+  return tablet ? phone + 4 : phone;
 }

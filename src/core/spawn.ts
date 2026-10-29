@@ -1,38 +1,15 @@
-// Placement of obstacles, portals and food, including the "never trap the
-// snake" validation used for every obstacle layout.
+// Infinite world: obstacles live in 16x16 chunks generated around the snake
+// and dropped when far away. Placement rules guarantee the snake can never be
+// trapped: pieces are small, never touch each other (not even diagonally), and
+// every placement is re-checked with a local pocket / dead-end test.
 import type { Rng } from './rng';
-import { DIRS, type Dir, type Vec } from './types';
+import { DIRS, type Vec } from './types';
 
-export interface BoardSpec {
-  cols: number;
-  rows: number;
-  wrap: boolean;
-}
+export const CHUNK = 16;
 
-/** Cell-occupancy grid helper. */
-export class CellMask {
-  readonly data: Uint8Array;
-
-  constructor(readonly cols: number, readonly rows: number) {
-    this.data = new Uint8Array(cols * rows);
-  }
-
-  inside(x: number, y: number): boolean {
-    return x >= 0 && y >= 0 && x < this.cols && y < this.rows;
-  }
-
-  get(x: number, y: number): boolean {
-    return this.inside(x, y) && this.data[y * this.cols + x] !== 0;
-  }
-
-  set(x: number, y: number, v = true): void {
-    if (this.inside(x, y)) this.data[y * this.cols + x] = v ? 1 : 0;
-  }
-
-  clear(): void {
-    this.data.fill(0);
-  }
-}
+/** Numeric key for a cell (exact for |x|, |y| < 500000). */
+export const cellKey = (x: number, y: number): number => x * 1_000_003 + y;
+const chunkKey = (cx: number, cy: number): number => cx * 100_003 + cy;
 
 /** Rotates a shape by 0/90/180/270 degrees and normalizes it to start at 0,0. */
 export function rotateShape(shape: Vec[], quarterTurns: number): Vec[] {
@@ -44,146 +21,181 @@ export function rotateShape(shape: Vec[], quarterTurns: number): Vec[] {
 }
 
 /**
- * A layout is "safe" when every free cell is reachable from the head and no
- * free cell is a dead-end pocket (3+ blocked sides), so a snake can never be
- * forced into a spot with no way out by the static layout alone.
+ * Local safety check around a rectangle: inside the window no free cell may be
+ * a dead end (3+ blocked sides) and every free cell must be able to reach the
+ * window border (no enclosed pockets).
  */
-export function isLayoutSafe(spec: BoardSpec, blocked: CellMask, start: Vec): boolean {
-  const { cols, rows, wrap } = spec;
-  if (blocked.get(start.x, start.y)) return false;
-  let free = 0;
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (blocked.get(x, y)) continue;
-      free++;
+export function isWindowSafe(blocked: (x: number, y: number) => boolean, x0: number, y0: number, x1: number, y1: number): boolean {
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const seen = new Uint8Array(w * h);
+  const stack: number[] = [];
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (blocked(x, y)) continue;
       let walls = 0;
-      for (const d of DIRS) {
-        let nx = x + d.x;
-        let ny = y + d.y;
-        if (wrap) {
-          nx = (nx + cols) % cols;
-          ny = (ny + rows) % rows;
-        }
-        if (!blocked.inside(nx, ny) || blocked.get(nx, ny)) walls++;
-      }
+      for (const d of DIRS) if (blocked(x + d.x, y + d.y)) walls++;
       if (walls >= 3) return false;
+      if (x === x0 || x === x1 || y === y0 || y === y1) {
+        const i = (y - y0) * w + (x - x0);
+        seen[i] = 1;
+        stack.push(i);
+      }
     }
   }
-  // Flood fill from the head.
-  const seen = new Uint8Array(cols * rows);
-  const stack: number[] = [start.y * cols + start.x];
-  seen[stack[0]] = 1;
-  let reached = 0;
+  // Flood fill inward from the free border cells.
   while (stack.length) {
-    const idx = stack.pop()!;
-    reached++;
-    const x = idx % cols;
-    const y = (idx / cols) | 0;
+    const i = stack.pop()!;
+    const x = x0 + (i % w);
+    const y = y0 + ((i / w) | 0);
     for (const d of DIRS) {
-      let nx = x + d.x;
-      let ny = y + d.y;
-      if (wrap) {
-        nx = (nx + cols) % cols;
-        ny = (ny + rows) % rows;
-      } else if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-      const n = ny * cols + nx;
-      if (seen[n] || blocked.data[n]) continue;
+      const nx = x + d.x;
+      const ny = y + d.y;
+      if (nx < x0 || ny < y0 || nx > x1 || ny > y1) continue;
+      const n = (ny - y0) * w + (nx - x0);
+      if (seen[n] || blocked(nx, ny)) continue;
       seen[n] = 1;
       stack.push(n);
     }
   }
-  return reached === free;
-}
-
-export interface ObstacleRequest {
-  spec: BoardSpec;
-  pieces: number;
-  shapes: Vec[][];
-  snake: Vec[];
-  dir: Dir;
-  /** Extra cells to keep clear (portals, ...), with a 1-cell margin. */
-  reserved: Vec[];
-  rng: Rng;
-}
-
-/** Radius around the head (Chebyshev) where nothing hostile may spawn. */
-export const HEAD_SAFE_RADIUS = 4;
-/** Cells straight ahead of the head that are kept clear. */
-export const HEAD_SAFE_AHEAD = 8;
-
-/** Marks cells that must stay free of obstacles: snake (+1 margin), head zone, path ahead, reserved cells. */
-export function buildForbiddenMask(spec: BoardSpec, snake: Vec[], dir: Dir, reserved: Vec[]): CellMask {
-  const m = new CellMask(spec.cols, spec.rows);
-  const mark = (x: number, y: number) => {
-    if (spec.wrap) m.set((x + spec.cols) % spec.cols, (y + spec.rows) % spec.rows);
-    else m.set(x, y);
-  };
-  const around = (p: Vec, r: number) => {
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) mark(p.x + dx, p.y + dy);
-  };
-  for (const s of snake) around(s, 1);
-  for (const r of reserved) around(r, 1);
-  const head = snake[0];
-  if (head) {
-    around(head, HEAD_SAFE_RADIUS);
-    const d = DIRS[dir];
-    for (let k = 1; k <= HEAD_SAFE_AHEAD; k++) {
-      const cx = head.x + d.x * k;
-      const cy = head.y + d.y * k;
-      mark(cx, cy);
-      mark(cx + d.y, cy + d.x);
-      mark(cx - d.y, cy - d.x);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (!blocked(x, y) && !seen[(y - y0) * w + (x - x0)]) return false;
     }
   }
-  return m;
+  return true;
 }
 
-/** Places obstacle pieces one by one, keeping only placements that leave the layout safe. */
-export function generateObstacles(req: ObstacleRequest): Vec[] {
-  const { spec, pieces, shapes, snake, dir, reserved, rng } = req;
-  const out: Vec[] = [];
-  if (pieces <= 0 || shapes.length === 0 || snake.length === 0) return out;
-  const forbidden = buildForbiddenMask(spec, snake, dir, reserved);
-  const blocked = new CellMask(spec.cols, spec.rows);
-  // Cells next to placed obstacles: keeps pieces apart so they never form walls.
-  const spacing = new CellMask(spec.cols, spec.rows);
+export interface ObstacleCell extends Vec {
+  /** Stable per-cell variation (model variant / rotation) for rendering. */
+  seed: number;
+}
 
-  for (let p = 0; p < pieces; p++) {
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const shape = rotateShape(rng.pick(shapes), rng.int(4));
-      const ox = rng.int(spec.cols);
-      const oy = rng.int(spec.rows);
-      const cells = shape.map((s) => ({ x: ox + s.x, y: oy + s.y }));
-      if (!cells.every((c) => blocked.inside(c.x, c.y) && !forbidden.get(c.x, c.y) && !spacing.get(c.x, c.y))) continue;
-      for (const c of cells) blocked.set(c.x, c.y);
-      if (!isLayoutSafe(spec, blocked, snake[0])) {
-        for (const c of cells) blocked.set(c.x, c.y, false);
-        continue;
+/** Chunked, unbounded obstacle field. */
+export class ObstacleWorld {
+  private readonly blocked = new Set<number>();
+  private readonly chunks = new Map<number, ObstacleCell[]>();
+  private list: ObstacleCell[] = [];
+  private dirty = true;
+  /** Increments whenever the set of obstacles changes (renderer cache key). */
+  version = 0;
+
+  constructor(
+    private readonly rng: Rng,
+    private shapes: Vec[][],
+    private readonly piecesPerChunk: number,
+  ) {}
+
+  has(x: number, y: number): boolean {
+    return this.blocked.has(cellKey(x, y));
+  }
+
+  get chunkCount(): number {
+    return this.chunks.size;
+  }
+
+  /** All obstacle cells currently loaded. */
+  cells(): ObstacleCell[] {
+    if (this.dirty) {
+      this.list = [];
+      for (const c of this.chunks.values()) for (const o of c) this.list.push(o);
+      this.dirty = false;
+    }
+    return this.list;
+  }
+
+  setShapes(shapes: Vec[][]): void {
+    this.shapes = shapes;
+  }
+
+  /** Generates missing chunks within `radius` chunks of the cell (x, y) and drops far ones. */
+  update(x: number, y: number, radius: number, forbidden: (x: number, y: number) => boolean): void {
+    const ccx = Math.floor(x / CHUNK);
+    const ccy = Math.floor(y / CHUNK);
+    for (let cy = ccy - radius; cy <= ccy + radius; cy++) {
+      for (let cx = ccx - radius; cx <= ccx + radius; cx++) {
+        const k = chunkKey(cx, cy);
+        if (!this.chunks.has(k)) this.generateChunk(cx, cy, k, forbidden);
       }
-      for (const c of cells) {
-        out.push(c);
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) spacing.set(c.x + dx, c.y + dy);
+    }
+    const keep = radius + 1;
+    for (const [k, cells] of this.chunks) {
+      const cx = Math.round(k / 100_003);
+      const cy = k - cx * 100_003;
+      if (Math.abs(cx - ccx) > keep || Math.abs(cy - ccy) > keep) {
+        for (const c of cells) this.blocked.delete(cellKey(c.x, c.y));
+        this.chunks.delete(k);
+        this.dirty = true;
+        this.version++;
       }
-      break;
     }
   }
-  return out;
+
+  /** Drops everything (zone change); call update() afterwards to rebuild. */
+  clear(): void {
+    this.blocked.clear();
+    this.chunks.clear();
+    this.dirty = true;
+    this.version++;
+  }
+
+  private generateChunk(cx: number, cy: number, key: number, forbidden: (x: number, y: number) => boolean): void {
+    const cells: ObstacleCell[] = [];
+    this.chunks.set(key, cells);
+    this.dirty = true;
+    this.version++;
+    if (this.piecesPerChunk <= 0 || this.shapes.length === 0) return;
+    const rng = this.rng;
+    const base = Math.floor(this.piecesPerChunk);
+    const pieces = base + (rng.chance(this.piecesPerChunk - base) ? 1 : 0);
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    const isBlocked = (x: number, y: number) => this.blocked.has(cellKey(x, y));
+
+    for (let p = 0; p < pieces; p++) {
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const shape = rotateShape(rng.pick(this.shapes), rng.int(4));
+        const ox = x0 + rng.int(CHUNK - 2);
+        const oy = y0 + rng.int(CHUNK - 2);
+        const piece = shape.map((s) => ({ x: ox + s.x, y: oy + s.y }));
+        if (!piece.every((c) => c.x < x0 + CHUNK && c.y < y0 + CHUNK && !forbidden(c.x, c.y))) continue;
+        // Pieces never touch other pieces, not even diagonally.
+        let touches = false;
+        for (const c of piece) {
+          for (let dy = -1; dy <= 1 && !touches; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (isBlocked(c.x + dx, c.y + dy)) {
+                touches = true;
+                break;
+              }
+            }
+          }
+          if (touches) break;
+        }
+        if (touches) continue;
+        for (const c of piece) this.blocked.add(cellKey(c.x, c.y));
+        const xs = piece.map((c) => c.x);
+        const ys = piece.map((c) => c.y);
+        if (!isWindowSafe(isBlocked, Math.min(...xs) - 3, Math.min(...ys) - 3, Math.max(...xs) + 3, Math.max(...ys) + 3)) {
+          for (const c of piece) this.blocked.delete(cellKey(c.x, c.y));
+          continue;
+        }
+        for (const c of piece) cells.push({ x: c.x, y: c.y, seed: rng.int(1 << 30) });
+        break;
+      }
+    }
+  }
 }
 
-/** Picks a random cell for which `ok` returns true (null when the board is full). */
-export function randomFreeCell(spec: BoardSpec, rng: Rng, ok: (x: number, y: number) => boolean): Vec | null {
-  for (let i = 0; i < 200; i++) {
-    const x = rng.int(spec.cols);
-    const y = rng.int(spec.rows);
-    if (ok(x, y)) return { x, y };
-  }
-  // Fallback: scan from a random offset so crowded boards still find a cell.
-  const total = spec.cols * spec.rows;
-  const off = rng.int(total);
-  for (let k = 0; k < total; k++) {
-    const idx = (off + k) % total;
-    const x = idx % spec.cols;
-    const y = (idx / spec.cols) | 0;
+/**
+ * Picks a random cell whose Chebyshev distance from `center` is within
+ * [minD, maxD] and for which `ok` returns true (null when none is found).
+ */
+export function randomCellNear(center: Vec, minD: number, maxD: number, rng: Rng, ok: (x: number, y: number) => boolean): Vec | null {
+  for (let i = 0; i < 300; i++) {
+    const x = center.x + rng.int(maxD * 2 + 1) - maxD;
+    const y = center.y + rng.int(maxD * 2 + 1) - maxD;
+    if (Math.max(Math.abs(x - center.x), Math.abs(y - center.y)) < minD) continue;
     if (ok(x, y)) return { x, y };
   }
   return null;

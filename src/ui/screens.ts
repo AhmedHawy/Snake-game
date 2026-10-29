@@ -3,6 +3,7 @@
 import { DIFFICULTY_ORDER, type DifficultyId } from '../config/difficulty';
 import { t, type I18nKey, type Lang } from '../config/i18n';
 import { MODE_ORDER, type ModeId } from '../config/modes';
+import type { BoardSize } from '../core/grid';
 import { SKINS, SKIN_ORDER, type SkinId } from '../config/skins';
 import { drawSkinPreview } from '../render/preview';
 import type { Settings } from '../storage/storage';
@@ -28,6 +29,9 @@ export interface UiHost {
   updateSettings(patch: Partial<Settings>): void;
   tap(): void;
   bestFor(mode: ModeId, diff: DifficultyId): number;
+  /** An exit button is only offered inside the installed Android app. */
+  readonly canExit: boolean;
+  exit(): void;
 }
 
 export type ScreenId = 'none' | 'main' | 'mode' | 'difficulty' | 'skins' | 'settings' | 'scores' | 'pause' | 'over';
@@ -165,6 +169,7 @@ export class Screens {
         this.button(`⚙️ ${t('menu.settings')}`, () => this.show('settings')),
       ),
       this.button(`🏆 ${t('menu.highScores')}`, () => this.show('scores'), 'btn-wide'),
+      this.host.canExit ? this.button(`🚪 ${t('menu.exit')}`, () => this.host.exit(), 'btn-exit') : null,
     );
   }
 
@@ -304,6 +309,12 @@ export class Screens {
         'div',
         { class: 'settings' },
         this.segmented<Lang>('settings.language', [['ar', 'العربية'], ['en', 'English']], s.lang, (v) => this.host.updateSettings({ lang: v })),
+        this.segmented<BoardSize>(
+          'settings.boardSize',
+          [['small', t('settings.size.small')], ['normal', t('settings.size.normal')], ['large', t('settings.size.large')]],
+          s.boardSize,
+          (v) => this.host.updateSettings({ boardSize: v }),
+        ),
         h('div', { class: 'row col' }, h('span', { class: 'row-head' }, h('span', { text: t('settings.volume') }), volLabel), slider),
         this.toggle('settings.mute', s.muted, (v) => this.host.updateSettings({ muted: v })),
         this.toggle('settings.haptics', s.haptics, (v) => this.host.updateSettings({ haptics: v })),

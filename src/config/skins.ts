@@ -1,5 +1,5 @@
 // Snake skins. `body` returns the fill color of segment i (0 = head) of n.
-export type SkinId = 'classic' | 'rainbow' | 'tiger' | 'neon' | 'candy' | 'ocean';
+export type SkinId = 'classic' | 'rainbow' | 'tiger' | 'neon' | 'candy' | 'ocean' | 'dragon';
 
 export interface SkinConfig {
   id: SkinId;
@@ -11,6 +11,10 @@ export interface SkinConfig {
   glow?: string;
   eyeWhite: string;
   pupil: string;
+  /** Self-glow strength (0..1) for the 3D body. */
+  emissive?: number;
+  /** Dragon extras: horns and spines along the back. */
+  dragon?: { horn: string; spine: string };
 }
 
 type RGB = [number, number, number];
@@ -47,6 +51,7 @@ const TIGER = gradient(['#ffb347', '#ff9a1f', '#f07800']);
 const NEON = gradient(['#00f0ff', '#7a5cff', '#ff2bd6']);
 const CANDY = ['#ff6fb5', '#fff0f7', '#7ee8c7', '#fff0f7'];
 const OCEAN = gradient(['#5ee6ff', '#00a6ff', '#0050a8']);
+const DRAGON = gradient(['#ff3b1f', '#c8102e', '#8b0000', '#ff6a00']);
 
 export const SKINS: Record<SkinId, SkinConfig> = {
   classic: {
@@ -67,7 +72,7 @@ export const SKINS: Record<SkinId, SkinConfig> = {
   neon: {
     id: 'neon', nameKey: 'skin.neon',
     body: (i, n) => pick(NEON, along(i, n)),
-    head: '#00f0ff', outline: '#14002e', glow: 'rgba(255,43,214,0.35)', eyeWhite: '#ffffff', pupil: '#14002e',
+    head: '#00f0ff', outline: '#14002e', glow: 'rgba(255,43,214,0.35)', eyeWhite: '#ffffff', pupil: '#14002e', emissive: 0.45,
   },
   candy: {
     id: 'candy', nameKey: 'skin.candy',
@@ -79,6 +84,13 @@ export const SKINS: Record<SkinId, SkinConfig> = {
     body: (i, n) => pick(OCEAN, along(i, n)),
     head: '#5ee6ff', outline: '#00274f', eyeWhite: '#ffffff', pupil: '#00142b',
   },
+  dragon: {
+    id: 'dragon', nameKey: 'skin.dragon',
+    // Deep reds with darker scale bands, fading to fiery orange at the tail.
+    body: (i, n) => (i % 3 === 1 ? '#a3121a' : pick(DRAGON, along(i, n))),
+    head: '#d7261e', outline: '#3a0505', eyeWhite: '#ffd23f', pupil: '#2a0000',
+    dragon: { horn: '#f5deb3', spine: '#ff8c1a' },
+  },
 };
 
-export const SKIN_ORDER: SkinId[] = ['classic', 'rainbow', 'tiger', 'neon', 'candy', 'ocean'];
+export const SKIN_ORDER: SkinId[] = ['classic', 'dragon', 'rainbow', 'tiger', 'neon', 'candy', 'ocean'];

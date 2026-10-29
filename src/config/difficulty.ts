@@ -11,11 +11,9 @@ export interface DifficultyConfig {
   rampMsPerFood: number;
   /** Step time multiplier applied for every completed loop through all zones. */
   loopSpeedFactor: number;
-  /** Walls wrap around instead of killing. */
-  wrapWalls: boolean;
-  /** Number of static obstacle pieces per zone. */
-  obstaclePieces: number;
-  /** Number of moving (patrolling) single-cell obstacles. */
+  /** Average static obstacle pieces per 16x16 world chunk (the world has no walls). */
+  obstaclesPerChunk: number;
+  /** Number of moving (patrolling) single-cell obstacles kept around the snake. */
   movingObstacles: number;
   /** Chance (0..1) after eating an apple that a special item appears. */
   specialChance: number;
@@ -28,7 +26,7 @@ export interface DifficultyConfig {
   powerUpDurationFactor: number;
   /**
    * Combo window slack: the player has (distance to next apple + slack) steps
-   * to keep the combo, where slack = (cols + rows) * comboSlackFactor.
+   * to keep the combo, where slack = (view radius * 5) * comboSlackFactor.
    */
   comboSlackFactor: number;
 }
@@ -40,8 +38,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     minStepMs: 115,
     rampMsPerFood: 0.8,
     loopSpeedFactor: 0.93,
-    wrapWalls: true,
-    obstaclePieces: 0,
+    obstaclesPerChunk: 0,
     movingObstacles: 0,
     specialChance: 0.35,
     poisonChance: 0,
@@ -57,8 +54,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     minStepMs: 85,
     rampMsPerFood: 1.3,
     loopSpeedFactor: 0.9,
-    wrapWalls: false,
-    obstaclePieces: 4,
+    obstaclesPerChunk: 1.6,
     movingObstacles: 0,
     specialChance: 0.3,
     poisonChance: 0,
@@ -74,8 +70,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     minStepMs: 65,
     rampMsPerFood: 1.8,
     loopSpeedFactor: 0.88,
-    wrapWalls: false,
-    obstaclePieces: 7,
+    obstaclesPerChunk: 2.8,
     movingObstacles: 0,
     specialChance: 0.3,
     poisonChance: 0.2,
@@ -91,9 +86,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     minStepMs: 50,
     rampMsPerFood: 2.2,
     loopSpeedFactor: 0.86,
-    wrapWalls: false,
-    obstaclePieces: 6,
-    movingObstacles: 4,
+    obstaclesPerChunk: 2.4,
+    movingObstacles: 5,
     specialChance: 0.3,
     poisonChance: 0.35,
     goldenLifetimeMs: 2500,

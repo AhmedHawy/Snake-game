@@ -5,11 +5,10 @@ import { DIFFICULTIES, type DifficultyId } from './config/difficulty';
 import { setLang, t, type I18nKey } from './config/i18n';
 import { MODES, type ModeId } from './config/modes';
 import { SKINS } from './config/skins';
-import { chooseGridDims, computeLayout, fitBoard, isTablet, type BoardLayout } from './core/grid';
+import { computeLayout, isTablet, visibleShortCells, type BoardLayout } from './core/grid';
 import { FixedLoop } from './core/loop';
 import { Game } from './core/state';
 import type { Dir } from './core/types';
-import { Ambient } from './fx/ambient';
 import { Fx } from './fx/effects';
 import { DPad } from './input/dpad';
 import { bindKeyboard } from './input/keyboard';
@@ -17,15 +16,16 @@ import { SwipeInput } from './input/swipe';
 import { haptics, setHapticsEnabled } from './platform/haptics';
 import { bindLifecycle, exitApp } from './platform/lifecycle';
 import { readSafeArea } from './platform/safeArea';
-import { Renderer } from './render/renderer';
-import { computeSnakePoints, snakePoint } from './render/snake';
+import { Capacitor } from '@capacitor/core';
+import { Renderer3D } from './render3d/scene';
 import { bestScore, loadSettings, saveSettings, submitScore, type Settings } from './storage/storage';
 import { hideZoneBanner, showZoneBanner } from './ui/banner';
 import { Hud } from './ui/hud';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
 
-const MAX_DPR = 2;
+/** Pixel ratio cap: WebGL fill rate matters on mid-range phones. */
+const MAX_DPR = 1.75;
 const ZONE_FADE_MS = 1400;
 /** Crash: slow-mo + scattering pieces before the Game Over panel. */
 const DEATH_SEQUENCE_MS = 1300;
@@ -36,7 +36,7 @@ const $ = (id: string) => document.getElementById(id)!;
 export class App implements UiHost {
   settings: Settings = loadSettings();
   private readonly canvas = $('game') as HTMLCanvasElement;
-  private readonly renderer = new Renderer(this.canvas);
+  private readonly renderer = new Renderer3D(this.canvas, $('app'));
   private readonly fx = new Fx();
   private readonly sfx = new Sfx();
   private readonly hud = new Hud($('hud'), { onPause: () => this.togglePause(), onMute: () => this.toggleMute() });
@@ -45,8 +45,8 @@ export class App implements UiHost {
   private readonly hint = $('hint');
   private game!: Game;
   private layout!: BoardLayout;
-  private ambient: Ambient | null = null;
-  private zoneFade: { from: number; ambient: Ambient | null; t: number } | null = null;
+  private zoneFade: { from: number; t: number } | null = null;
+  private lastFrameMs = 16;
   private inGame = false;
   private paused = false;
   private dyingMs = 0;
@@ -61,6 +61,7 @@ export class App implements UiHost {
   private readonly loop = new FixedLoop(
     (dt) => this.update(dt),
     (_left, frameMs, now) => {
+      this.lastFrameMs = frameMs;
       this.render();
       if (this.fpsEl) this.trackFps(frameMs, now);
     },
@@ -76,7 +77,7 @@ export class App implements UiHost {
     this.screens.show('main');
 
     new SwipeInput(this.canvas, {
-      deadZone: () => Math.max(12, Math.min(28, this.renderer.board.cell * 0.4)),
+      deadZone: () => 16,
       onDir: (d) => this.steer(d, false),
       onTap: () => {
         if (this.canPlay) this.game.begin();
@@ -159,6 +160,12 @@ export class App implements UiHost {
     this.screens.show('main');
   }
 
+  readonly canExit = Capacitor.isNativePlatform();
+
+  exit(): void {
+    exitApp();
+  }
+
   tap(): void {
     this.sfx.tap();
     haptics.tap();
@@ -182,7 +189,7 @@ export class App implements UiHost {
       this.hud.setMuted(this.settings.muted);
     }
     if (patch.haptics !== undefined) setHapticsEnabled(this.settings.haptics);
-    if (patch.dpad !== undefined || patch.dpadSide !== undefined) this.onResize();
+    if (patch.dpad !== undefined || patch.dpadSide !== undefined || patch.boardSize !== undefined) this.onResize();
     if ((patch.mode !== undefined || patch.difficulty !== undefined) && !this.inGame) this.newGame();
   }
 
@@ -271,13 +278,19 @@ export class App implements UiHost {
     document.documentElement.style.setProperty('--hud-h', `${hudH}px`);
   }
 
+  /** Cells visible across the short side of the view (zoom setting). */
+  private get shortCells(): number {
+    return visibleShortCells(this.settings.boardSize, isTablet(window.innerWidth, window.innerHeight));
+  }
+
   private applyBoard(): void {
-    const b = fitBoard(this.layout.area, this.game.cols, this.game.rows, this.dpr);
-    this.renderer.resize(window.innerWidth, window.innerHeight, this.dpr, b);
+    const a = this.layout.area;
+    this.renderer.resize(a, this.dpr);
+    this.renderer.setZoom(this.shortCells);
     const root = document.documentElement.style;
-    root.setProperty('--board-x', `${b.x}px`);
-    root.setProperty('--board-w', `${b.w}px`);
-    root.setProperty('--board-cy', `${b.y + b.h / 2}px`);
+    root.setProperty('--board-x', `${a.x}px`);
+    root.setProperty('--board-w', `${a.w}px`);
+    root.setProperty('--board-cy', `${a.y + a.h / 2}px`);
   }
 
   private syncDpad(): void {
@@ -286,20 +299,20 @@ export class App implements UiHost {
 
   private onResize(): void {
     this.measure();
-    // The menu background adapts its grid to the new orientation; a running
-    // game keeps its grid and the board is refitted.
-    if (!this.inGame) this.newGame();
-    else this.applyBoard();
+    this.applyBoard();
     this.syncDpad();
   }
 
   private newGame(): void {
-    const dims = chooseGridDims(this.layout.area, isTablet(window.innerWidth, window.innerHeight));
     const s = this.settings;
-    this.game = new Game({ ...dims, mode: MODES[s.mode] ?? MODES.classic, difficulty: DIFFICULTIES[s.difficulty] ?? DIFFICULTIES.normal });
+    this.game = new Game({
+      mode: MODES[s.mode] ?? MODES.classic,
+      difficulty: DIFFICULTIES[s.difficulty] ?? DIFFICULTIES.normal,
+      viewRadius: Math.ceil(this.shortCells / 2) + 1,
+    });
     this.best = bestScore(s.mode, s.difficulty);
     this.fx.reset();
-    this.ambient = new Ambient(this.game.zone, this.game.cols, this.game.rows);
+    this.renderer.reset();
     this.zoneFade = null;
     this.dyingMs = 0;
     this.overShown = false;
@@ -314,29 +327,17 @@ export class App implements UiHost {
 
   // ------------------------------------------------------------- frame
 
-  private get geom() {
-    const b = this.renderer.board;
-    return { x: b.x, y: b.y, cell: b.cell };
-  }
-
   private update(dt: number): void {
     if (this.paused) return;
     const g = this.game;
     const scaled = dt * this.fx.timeScale;
     if (this.inGame) g.update(scaled);
-    this.ambient?.update(scaled);
     if (this.zoneFade) {
-      this.zoneFade.ambient?.update(scaled);
       this.zoneFade.t += dt / ZONE_FADE_MS;
       if (this.zoneFade.t >= 1) this.zoneFade = null;
     }
     this.handleEvents();
-    let head: { x: number; y: number } | null = null;
-    if (g.status === 'playing') {
-      computeSnakePoints(g, this.geom.x, this.geom.y, this.geom.cell, g.alpha);
-      head = snakePoint(0);
-    }
-    this.fx.update(dt, g, this.geom, head);
+    this.fx.update(dt, g, g.status === 'playing' ? this.renderer.head : null);
     if (g.status === 'dying') {
       this.dyingMs += dt;
       if (this.dyingMs > DEATH_SEQUENCE_MS) {
@@ -348,11 +349,11 @@ export class App implements UiHost {
 
   private handleEvents(): void {
     const g = this.game;
-    const geom = this.geom;
+    const head = this.renderer.head;
     for (const e of g.events) {
       switch (e.type) {
         case 'eat': {
-          this.fx.onEat(g, e.food, e.points, e.multiplier, geom);
+          this.fx.onEat(g, e.food, e.points, e.multiplier);
           const ty = e.food.type;
           if (ty === 'golden') this.sfx.golden();
           else if (ty === 'poison') this.sfx.poison();
@@ -361,28 +362,28 @@ export class App implements UiHost {
           if (ty === 'poison') haptics.bad();
           else haptics.eat();
           if (ty === 'shrink' || ty === 'poison') {
-            const c = this.renderer.cellCenter(e.food.pos);
             this.fx.popup(
-              c.x,
-              c.y + geom.cell * 0.6,
+              e.food.pos.x,
+              0.4,
+              e.food.pos.y + 0.6,
               t(ty === 'shrink' ? 'food.shrink' : 'food.poison'),
               ty === 'shrink' ? '#ff5fa2' : '#c77dff',
-              geom.cell * 0.55,
+              20,
             );
           }
           break;
         }
         case 'combo':
-          this.fx.onCombo(e.multiplier, g.head, geom);
+          this.fx.onCombo(e.multiplier, head);
           this.sfx.combo(e.multiplier);
           break;
         case 'effect':
-          this.fx.onEffect(e.effect, g.head, geom);
+          this.fx.onEffect(e.effect, head);
           this.sfx.powerUp();
           haptics.powerUp();
           break;
         case 'shrink':
-          this.fx.onShrink(e.removed, e.poison, geom, this.skin);
+          this.fx.onShrink(e.removed, e.poison, this.skin);
           break;
         case 'zone':
           this.onZone();
@@ -390,19 +391,18 @@ export class App implements UiHost {
           break;
         case 'portal': {
           const p = g.portals.find((q) => (q.a.x === e.from.x && q.a.y === e.from.y) || (q.b.x === e.from.x && q.b.y === e.from.y));
-          this.fx.onPortal(e.from, e.to, p?.color ?? '#fff', geom);
+          this.fx.onPortal(e.from, e.to, p?.color ?? '#fff');
           this.sfx.portal();
           break;
         }
         case 'expire':
-          this.fx.onExpire(e.food, geom);
+          this.fx.onExpire(e.food);
           break;
         case 'crash': {
-          const n = computeSnakePoints(g, geom.x, geom.y, geom.cell, 1);
-          const pts = Array.from({ length: n }, (_, i) => snakePoint(i));
+          const pts = this.renderer.segmentPoints(g);
           const now = performance.now();
-          const colors = pts.map((_, i) => (i === 0 ? this.skin.head : this.skin.body(i, n, now)));
-          this.fx.onCrash(pts, colors, e.at, geom);
+          const colors = pts.map((_, i) => (i === 0 ? this.skin.head : this.skin.body(i, pts.length, now)));
+          this.fx.onCrash(pts, colors, e.at);
           this.sfx.crash();
           haptics.crash();
           this.dyingMs = 0;
@@ -422,8 +422,7 @@ export class App implements UiHost {
   private onZone(): void {
     const g = this.game;
     const from = (g.zoneIndex - 1 + g.zones.length) % g.zones.length;
-    this.zoneFade = { from, ambient: this.ambient, t: 0 };
-    this.ambient = new Ambient(g.zone, g.cols, g.rows);
+    this.zoneFade = { from, t: 0 };
     showZoneBanner(g.zone, g.loop);
     this.setThemeColor(g.zone.palette.backdrop);
   }
@@ -449,7 +448,15 @@ export class App implements UiHost {
 
   private render(): void {
     const g = this.game;
-    this.renderer.draw({ game: g, timeMs: performance.now(), skin: this.skin, fx: this.fx, ambient: this.ambient, zoneFade: this.zoneFade });
+    this.renderer.draw({
+      game: g,
+      timeMs: performance.now(),
+      dtMs: this.lastFrameMs,
+      skin: this.skin,
+      fx: this.fx,
+      zoneFade: this.zoneFade,
+      showArrow: this.inGame && !this.paused && g.status === 'playing',
+    });
     if (this.inGame) this.hud.update(g, this.best);
     const showHint = this.inGame && !this.paused && g.status === 'ready' && this.screens.current === 'none';
     if (showHint === this.hint.classList.contains('hidden')) {

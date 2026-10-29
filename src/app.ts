@@ -1,5 +1,7 @@
-import { DIFFICULTIES } from './config/difficulty';
-import { MODES } from './config/modes';
+import { DIFFICULTIES, type DifficultyId } from './config/difficulty';
+import { MODES, type ModeId } from './config/modes';
+import { SKINS, type SkinId } from './config/skins';
+import { Fx } from './fx/effects';
 import { chooseGridDims, computeLayout, fitBoard, isTablet, type BoardLayout } from './core/grid';
 import { FixedLoop } from './core/loop';
 import { Game } from './core/state';
@@ -14,6 +16,8 @@ export class App {
   private readonly canvas = document.getElementById('game') as HTMLCanvasElement;
   private readonly renderer = new Renderer(this.canvas);
   private game!: Game;
+  private readonly fx = new Fx();
+  private readonly params = new URLSearchParams(location.search);
   private layout!: BoardLayout;
   private readonly loop = new FixedLoop(
     (dt) => this.update(dt),
@@ -51,7 +55,12 @@ export class App {
 
   private newGame(): void {
     const dims = chooseGridDims(this.layout.area, isTablet(window.innerWidth, window.innerHeight));
-    this.game = new Game({ ...dims, mode: MODES.classic, difficulty: DIFFICULTIES.normal });
+    this.game = new Game({
+      ...dims,
+      mode: MODES[(this.params.get('mode') as ModeId) || 'classic'] ?? MODES.classic,
+      difficulty: DIFFICULTIES[(this.params.get('diff') as DifficultyId) || 'normal'] ?? DIFFICULTIES.normal,
+    });
+    this.fx.reset();
     this.applyBoard();
   }
 
@@ -67,12 +76,15 @@ export class App {
 
   private update(dt: number): void {
     this.game.update(dt);
+    this.fx.update(dt);
+    for (const e of this.game.events) if (e.type === 'eat') this.fx.onEat(this.game);
+    this.game.events.length = 0;
     if (this.game.status === 'dying') this.game.finishDying();
     if (this.game.status === 'over') this.newGame();
-    this.game.events.length = 0;
   }
 
   private render(): void {
-    this.renderer.draw(this.game);
+    const skin = SKINS[(this.params.get('skin') as SkinId) || 'classic'] ?? SKINS.classic;
+    this.renderer.draw({ game: this.game, timeMs: performance.now(), skin, fx: this.fx });
   }
 }

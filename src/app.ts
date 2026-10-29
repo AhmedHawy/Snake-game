@@ -1,7 +1,9 @@
 import { DIFFICULTIES, type DifficultyId } from './config/difficulty';
 import { MODES, type ModeId } from './config/modes';
 import { SKINS, type SkinId } from './config/skins';
+import { Ambient } from './fx/ambient';
 import { Fx } from './fx/effects';
+import { showZoneBanner } from './ui/banner';
 import { chooseGridDims, computeLayout, fitBoard, isTablet, type BoardLayout } from './core/grid';
 import { FixedLoop } from './core/loop';
 import { Game } from './core/state';
@@ -11,6 +13,7 @@ import { readSafeArea } from './platform/safeArea';
 import { Renderer } from './render/renderer';
 
 const MAX_DPR = 2.5;
+const ZONE_FADE_MS = 1400;
 
 export class App {
   private readonly canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -19,6 +22,8 @@ export class App {
   private readonly fx = new Fx();
   private readonly params = new URLSearchParams(location.search);
   private layout!: BoardLayout;
+  private ambient: Ambient | null = null;
+  private zoneFade: { from: number; ambient: Ambient | null; t: number } | null = null;
   private readonly loop = new FixedLoop(
     (dt) => this.update(dt),
     () => this.render(),
@@ -61,6 +66,8 @@ export class App {
       difficulty: DIFFICULTIES[(this.params.get('diff') as DifficultyId) || 'normal'] ?? DIFFICULTIES.normal,
     });
     this.fx.reset();
+    this.ambient = new Ambient(this.game.zone, this.game.cols, this.game.rows);
+    this.zoneFade = null;
     this.applyBoard();
   }
 
@@ -77,14 +84,31 @@ export class App {
   private update(dt: number): void {
     this.game.update(dt);
     this.fx.update(dt);
-    for (const e of this.game.events) if (e.type === 'eat') this.fx.onEat(this.game);
+    this.ambient?.update(dt);
+    if (this.zoneFade) {
+      this.zoneFade.ambient?.update(dt);
+      this.zoneFade.t += dt / ZONE_FADE_MS;
+      if (this.zoneFade.t >= 1) this.zoneFade = null;
+    }
+    for (const e of this.game.events) {
+      if (e.type === 'eat') this.fx.onEat(this.game);
+      else if (e.type === 'zone') this.onZone();
+    }
     this.game.events.length = 0;
     if (this.game.status === 'dying') this.game.finishDying();
     if (this.game.status === 'over') this.newGame();
   }
 
+  private onZone(): void {
+    const g = this.game;
+    const from = (g.zoneIndex - 1 + g.zones.length) % g.zones.length;
+    this.zoneFade = { from, ambient: this.ambient, t: 0 };
+    this.ambient = new Ambient(g.zone, g.cols, g.rows);
+    showZoneBanner(g.zone, g.loop);
+  }
+
   private render(): void {
     const skin = SKINS[(this.params.get('skin') as SkinId) || 'classic'] ?? SKINS.classic;
-    this.renderer.draw({ game: this.game, timeMs: performance.now(), skin, fx: this.fx });
+    this.renderer.draw({ game: this.game, timeMs: performance.now(), skin, fx: this.fx, ambient: this.ambient, zoneFade: this.zoneFade });
   }
 }

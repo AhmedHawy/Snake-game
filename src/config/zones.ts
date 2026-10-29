@@ -97,7 +97,7 @@ export const ZONES: ZoneConfig[] = [
     nameKey: 'zone.volcano',
     palette: {
       backdrop: '#1a0503', boardA: '#3b0f0a', boardB: '#43130c', pattern: '#ff5a1f', border: '#120302',
-      obstacle: '#2b2522', obstacleLight: '#5a4a44', obstacleDark: '#0e0b0a',
+      obstacle: '#4a3f3a', obstacleLight: '#7a6a62', obstacleDark: '#ff6a00',
       ambient: ['#ff7b00', '#ffb000', '#ff3d00'], accent: '#ff8a3d',
     },
     pattern: 'cracks', ambient: 'embers', ambientCount: 40,

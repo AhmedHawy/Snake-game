@@ -5,6 +5,8 @@ import type { SkinConfig } from '../config/skins';
 import type { Rect } from '../core/grid';
 import { TIMED_EFFECTS, type Game } from '../core/state';
 import type { Vec } from '../core/types';
+import type { ZoneConfig } from '../config/zones';
+import type { Ambient } from '../fx/ambient';
 import type { Fx } from '../fx/effects';
 import { boardRadius, renderBoardBackground } from './background';
 import { drawSnake, snakePoint } from './snake';
@@ -21,6 +23,9 @@ export interface RenderView {
   timeMs: number;
   skin: SkinConfig;
   fx: Fx;
+  ambient: Ambient | null;
+  /** Zone crossfade in progress: previous zone index, its ambient layer and progress 0..1. */
+  zoneFade: { from: number; ambient: Ambient | null; t: number } | null;
 }
 
 export class Renderer {
@@ -71,12 +76,22 @@ export class Renderer {
     const zone = game.zone;
     const alpha = game.alpha;
 
+    const fade = view.zoneFade;
+    const ft = fade ? fade.t : 1;
+    const oldZone = fade ? game.zones[fade.from] : null;
+
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = zone.palette.backdrop;
+    ctx.fillStyle = oldZone ? oldZone.palette.backdrop : zone.palette.backdrop;
     ctx.fillRect(0, 0, this.width, this.height);
+    if (oldZone) {
+      ctx.globalAlpha = ft;
+      ctx.fillStyle = zone.palette.backdrop;
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.globalAlpha = 1;
+    }
 
-    // Board frame + background.
+    // Board frame + background (crossfaded during zone changes).
     const r = boardRadius(board.cell);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
@@ -87,15 +102,23 @@ export class Renderer {
     ctx.beginPath();
     ctx.roundRect(board.x - 2, board.y - 2, board.w + 4, board.h + 4, r + 2);
     ctx.stroke();
+    if (fade) {
+      ctx.drawImage(this.background(game, fade.from), board.x, board.y, board.w, board.h);
+      ctx.globalAlpha = ft;
+    }
     ctx.drawImage(this.background(game, game.zoneIndex), board.x, board.y, board.w, board.h);
+    ctx.globalAlpha = 1;
 
     ctx.save();
     ctx.beginPath();
     ctx.roundRect(board.x, board.y, board.w, board.h, r);
     ctx.clip();
 
+    fade?.ambient?.draw(ctx, board.x, board.y, board.cell, 1 - ft);
+    view.ambient?.draw(ctx, board.x, board.y, board.cell, ft);
     this.drawPortals(game, view.timeMs);
-    this.drawObstacles(game, game.obstacles, 1);
+    if (oldZone) this.drawObstacles(oldZone, game.oldObstacles, 1 - ft);
+    this.drawObstacles(zone, game.obstacles, oldZone ? Math.min(1, ft * 1.5) : 1);
     this.drawMovers(game, alpha, view.timeMs);
     this.drawFoods(game, alpha, view.timeMs);
 
@@ -123,13 +146,13 @@ export class Renderer {
     return { x: this.board.x + (p.x + 0.5) * c, y: this.board.y + (p.y + 0.5) * c };
   }
 
-  private drawObstacles(game: Game, cells: Vec[], alpha: number): void {
+  private drawObstacles(zone: ZoneConfig, cells: Vec[], alpha: number): void {
     if (cells.length === 0 || alpha <= 0) return;
     const { ctx, board } = this;
     const c = board.cell;
     ctx.globalAlpha = alpha;
     for (const o of cells) {
-      ctx.drawImage(this.sprites.obstacle(game.zone, obstacleVariant(o.x, o.y)), board.x + o.x * c, board.y + o.y * c, c, c);
+      ctx.drawImage(this.sprites.obstacle(zone, obstacleVariant(o.x, o.y)), board.x + o.x * c, board.y + o.y * c, c, c);
     }
     ctx.globalAlpha = 1;
   }
@@ -160,7 +183,7 @@ export class Renderer {
       const fy = f.prev.y + (f.pos.y - f.prev.y) * alpha;
       const cx = board.x + (fx + 0.5) * c;
       const cy = board.y + (fy + 0.5) * c;
-      const age = game.timeMs - f.bornMs;
+      const age = game.status === 'ready' ? 1e9 : game.timeMs - f.bornMs;
       const appear = age < 260 ? easeOutBack(age / 260) : 1;
       const bob = 1 + 0.07 * Math.sin(timeMs / 260 + f.id);
       let a = 1;

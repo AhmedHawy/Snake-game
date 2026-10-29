@@ -25,7 +25,7 @@ import { Hud } from './ui/hud';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
 
-const MAX_DPR = 2.5;
+const MAX_DPR = 2;
 const ZONE_FADE_MS = 1400;
 /** Crash: slow-mo + scattering pieces before the Game Over panel. */
 const DEATH_SEQUENCE_MS = 1300;
@@ -53,9 +53,17 @@ export class App implements UiHost {
   private overShown = false;
   private best = 0;
   private lastBackMs = 0;
+  /** Optional FPS meter for checking performance on a real device: add ?fps=1 to the URL. */
+  private readonly fpsEl = new URLSearchParams(location.search).has('fps') ? document.createElement('div') : null;
+  private fpsFrames = 0;
+  private fpsLast = 0;
+  private fpsWorst = 0;
   private readonly loop = new FixedLoop(
     (dt) => this.update(dt),
-    () => this.render(),
+    (_left, frameMs, now) => {
+      this.render();
+      if (this.fpsEl) this.trackFps(frameMs, now);
+    },
   );
 
   start(): void {
@@ -100,7 +108,23 @@ export class App implements UiHost {
       },
       onBack: () => this.onBack(),
     });
+    if (this.fpsEl) {
+      this.fpsEl.className = 'fps';
+      document.body.append(this.fpsEl);
+    }
     this.loop.start();
+  }
+
+  private trackFps(frameMs: number, now: number): void {
+    this.fpsFrames++;
+    this.fpsWorst = Math.max(this.fpsWorst, frameMs);
+    if (now - this.fpsLast >= 1000) {
+      const fps = Math.round((this.fpsFrames * 1000) / (now - this.fpsLast));
+      this.fpsEl!.textContent = `${fps} fps · worst ${Math.round(this.fpsWorst)}ms · ${this.fx.particles.count} p`;
+      this.fpsFrames = 0;
+      this.fpsWorst = 0;
+      this.fpsLast = now;
+    }
   }
 
   // ------------------------------------------------------------- UiHost
@@ -233,7 +257,8 @@ export class App implements UiHost {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const tablet = isTablet(w, h);
-    const hudH = tablet ? 92 : 84;
+    // Short landscape phones get a single-row HUD so the board keeps its height.
+    const hudH = h < 500 ? 52 : tablet ? 92 : 84;
     const dpadSize = Math.round(Math.min(tablet ? 200 : 156, Math.min(w, h) * 0.42));
     this.layout = computeLayout({
       width: w,

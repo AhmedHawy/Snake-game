@@ -117,30 +117,42 @@ export class Particles {
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.count === 0) return;
-    // Two passes keep composite-mode switches to a minimum.
+    // Two passes keep composite-mode switches to a minimum; fillStyle is only
+    // reassigned when it changes, and tiny particles are drawn as rects.
     for (let pass = 0; pass < 2; pass++) {
       ctx.globalCompositeOperation = pass === 0 ? 'source-over' : 'lighter';
+      let lastColor = '';
       for (let i = 0; i < this.count; i++) {
         if (this.glow[i] !== pass) continue;
         const t = this.life[i] / this.maxLife[i];
         ctx.globalAlpha = t < 0.3 ? t / 0.3 : 1;
-        ctx.fillStyle = this.color[i];
+        const color = this.color[i];
+        if (color !== lastColor) {
+          ctx.fillStyle = color;
+          lastColor = color;
+        }
         const s = this.size[i];
+        const x = this.x[i];
+        const y = this.y[i];
         const shape = this.shape[i];
-        if (shape === PShape.Square) {
-          ctx.fillRect(this.x[i] - s / 2, this.y[i] - s / 2, s, s);
+        if (shape === PShape.Square || s < 4) {
+          ctx.fillRect(x - s / 2, y - s / 2, s, s);
         } else if (shape === PShape.Circle) {
           ctx.beginPath();
-          ctx.arc(this.x[i], this.y[i], s / 2, 0, Math.PI * 2);
+          ctx.arc(x, y, s / 2, 0, Math.PI * 2);
           ctx.fill();
         } else {
-          ctx.save();
-          ctx.translate(this.x[i], this.y[i]);
-          ctx.rotate(this.rot[i]);
+          // Rotated square without save/restore.
+          const h = s * 0.5;
+          const c = Math.cos(this.rot[i]) * h;
+          const n = Math.sin(this.rot[i]) * h;
           ctx.beginPath();
-          ctx.roundRect(-s / 2, -s / 2, s, s, s * 0.3);
+          ctx.moveTo(x + c - n, y + n + c);
+          ctx.lineTo(x - c - n, y - n + c);
+          ctx.lineTo(x - c + n, y - n - c);
+          ctx.lineTo(x + c + n, y + n - c);
+          ctx.closePath();
           ctx.fill();
-          ctx.restore();
         }
       }
     }

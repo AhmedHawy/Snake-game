@@ -1,1 +1,156 @@
-# Snake-game
+# 🐍 سنيك راش — Snake Rush
+
+لعبة ثعبان ملوّنة وحديثة مصمّمة لموبايلات وتابلت Android: ٧ عوالم متغيّرة، قوى خاصة، سلاسل (Combo)، ٤ أنماط لعب و٤ مستويات صعوبة، واجهة عربية (افتراضيًا) وإنجليزية، وتعمل بالكامل بدون إنترنت.
+
+- **التقنيات:** HTML5 Canvas + TypeScript + Vite (بدون محرك ألعاب)
+- **PWA:** قابلة للتثبيت، تعمل بدون إنترنت، ملء الشاشة، أيقونة خاصة
+- **Android:** مغلّفة بـ Capacitor، والـ APK بيتبني تلقائيًا على GitHub Actions
+- **بدون:** موسيقى، إعلانات، تتبّع، تحليلات، أو أي طلبات شبكة
+
+---
+
+## 1) تجربتها على الموبايل مباشرة (GitHub Pages)
+
+كل `push` على فرع `main` بيبني اللعبة وينشرها تلقائيًا على GitHub Pages.
+
+**مرة واحدة فقط — تفعيل Pages:**
+1. افتح المستودع على GitHub ← **Settings** ← **Pages**.
+2. في **Build and deployment** ← **Source** اختر **GitHub Actions**.
+3. ادمج التغييرات في `main` (أو من تبويب **Actions** شغّل **Deploy PWA to GitHub Pages** يدويًا بزر **Run workflow**).
+
+بعدها اللعبة هتكون على:
+```
+https://ahmedhawy.github.io/Snake-game/
+```
+(اللينك بالظبط بيظهر في نتيجة الـ workflow تحت `deploy`.)
+
+> مسار الـ base في Vite بيتظبط تلقائيًا من اسم المستودع (`/Snake-game/`) جوه الـ workflow.
+
+### تثبيت الـ PWA على Android
+1. افتح اللينك في **Chrome** على الموبايل أو التابلت.
+2. افتح القائمة (⋮) ← **تثبيت التطبيق** أو **إضافة إلى الشاشة الرئيسية**.
+3. افتح **Snake Rush** من الشاشة الرئيسية: هتشتغل بملء الشاشة.
+4. بعد أول فتح، اللعبة بتشتغل **بدون إنترنت** تمامًا (كل الملفات والخط متخزّنين).
+
+> التحديثات بتنزل تلقائيًا في الخلفية؛ اقفل التطبيق وافتحه تاني عشان تاخد آخر نسخة.
+
+---
+
+## 2) ملف APK بدون كمبيوتر (GitHub Actions)
+
+الـ workflow **Build Android APK** (`.github/workflows/android.yml`) بيعمل الآتي:
+- بيجهّز JDK 21 وAndroid SDK ← `npm ci` ← الاختبارات ← `npm run build` ← `cap sync` ← `gradlew`.
+- بيبني **APK للتجربة (debug)** دائمًا.
+- لو أضفت الـ Secrets (تحت)، بيبني كمان **APK موقّع للنشر (release)**.
+- بيرفع الـ APK كـ **Artifact** قابل للتحميل من صفحة الـ workflow.
+- عند الـ push على `main` بيحدّث إصدار **`latest-build`** في **Releases** (لينك ثابت تحمّل منه من الموبايل).
+- عند عمل tag زي `v1.2.0` بيعمل Release باسم الإصدار ده.
+
+**إمتى بيشتغل:** push على `main`، tag يبدأ بـ `v`، أي Pull Request (للتجربة فقط بدون Release)، أو يدويًا من تبويب **Actions** ← **Build Android APK** ← **Run workflow**.
+
+### تحميل وتثبيت الـ APK على الموبايل
+1. من الموبايل افتح المستودع ← **Releases** ← **latest-build**.
+2. حمّل `SnakeRush-…-release.apk` (أو `…-debug.apk` لو مفيش release).
+3. افتح الملف ← اسمح لـ Chrome / مدير الملفات **بتثبيت تطبيقات غير معروفة** لما يطلب ← **تثبيت**.
+
+> **ملاحظة مهمة:** النسخة debug والنسخة release موقّعين بمفتاحين مختلفين. لو ثبّت واحدة وعايز تثبّت التانية، امسح الأولى الأول. النسخ اللي من نفس النوع بتتثبّت فوق بعض عادي (التحديث بيحافظ على أعلى النتائج والإعدادات).
+
+### APK موقّع (release): إنشاء الـ keystore وإضافة الـ Secrets
+
+**الخطوة 1 — إنشاء الـ keystore (مرة واحدة فقط، واحتفظ بيه في مكان آمن):**
+
+*على كمبيوتر فيه Java:*
+```bash
+keytool -genkeypair -v -keystore snake-rush.jks -alias snakerush \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+هيطلب منك كلمة سر للـ keystore وبيانات (الاسم… إلخ). استخدم نفس كلمة السر للمفتاح لو سألك.
+
+*على الموبايل بدون كمبيوتر (تطبيق Termux من F-Droid):*
+```bash
+pkg install openjdk-17
+keytool -genkeypair -v -keystore snake-rush.jks -alias snakerush \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+**الخطوة 2 — تحويل الـ keystore لنص base64:**
+```bash
+base64 -w 0 snake-rush.jks > keystore-base64.txt      # Linux / Termux
+base64 -i snake-rush.jks | tr -d '\n' > keystore-base64.txt   # macOS
+```
+على Windows (PowerShell):
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("snake-rush.jks")) | Out-File keystore-base64.txt -NoNewline
+```
+
+**الخطوة 3 — إضافة الـ Secrets على GitHub:**
+المستودع ← **Settings** ← **Secrets and variables** ← **Actions** ← **New repository secret**، وأضف الأربعة دول:
+
+| الاسم | القيمة |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | محتوى ملف `keystore-base64.txt` كله |
+| `ANDROID_KEYSTORE_PASSWORD` | كلمة سر الـ keystore |
+| `ANDROID_KEY_ALIAS` | `snakerush` (أو الـ alias اللي اخترته) |
+| `ANDROID_KEY_PASSWORD` | كلمة سر المفتاح (غالبًا نفس كلمة سر الـ keystore) |
+
+**الخطوة 4:** شغّل الـ workflow تاني (push على `main` أو **Run workflow**)، وهتلاقي `SnakeRush-…-release.apk` في الـ Artifact وفي Release.
+
+> ⚠️ لو ضاع الـ keystore أو كلمة السر، مش هتقدر تعمل تحديث للنسخة المثبّتة؛ هتضطر تمسحها وتثبّت من جديد. ما ترفعش ملف `.jks` في المستودع أبدًا (الـ `.gitignore` بيمنعه).
+
+---
+
+## 3) التشغيل محليًا (للمطوّرين)
+
+المتطلبات: Node.js 20 أو أحدث.
+
+```bash
+npm install
+npm run dev        # سيرفر تطوير على http://localhost:5173 (وعلى الشبكة المحلية كمان)
+npm test           # اختبارات الوحدة (vitest)
+npm run build      # نسخة الإنتاج في dist/
+npm run preview    # معاينة نسخة الإنتاج (فيها الـ service worker)
+```
+
+بناء APK محليًا (محتاج Android Studio / Android SDK وJDK 21):
+```bash
+npm run android:debug      # build + cap sync + gradlew assembleDebug
+# الناتج: android/app/build/outputs/apk/debug/app-debug.apk
+npm run android:open       # فتح المشروع في Android Studio
+```
+
+التحكم على الكمبيوتر: الأسهم أو WASD للحركة، Space / P / Esc للإيقاف المؤقت، M لكتم الصوت.
+
+---
+
+## 4) التعديل على اللعبة بسهولة
+
+كل الأرقام في ملفات إعدادات واضحة:
+
+| الملف | المحتوى |
+|---|---|
+| `src/config/difficulty.ts` | السرعة، تسارعها، الجدران، عدد العوائق، العوائق المتحركة، السمّ، مدة المكافآت، نافذة الـ Combo |
+| `src/config/zones.ts` | العوالم السبعة: الألوان، النقش، الجزيئات، شكل العوائق، وعدد الطعام لكل منطقة (`FOODS_PER_ZONE`) |
+| `src/config/food.ts` | أنواع الطعام والقوى: النقاط، النمو، المدة، الألوان، احتمالية الظهور |
+| `src/config/modes.ts` | الأنماط: كلاسيكي، البوابات، استرخاء، سباق الوقت |
+| `src/config/skins.ts` | أشكال الثعبان |
+| `src/config/i18n.ts` | كل نصوص العربي والإنجليزي |
+
+أيقونة التطبيق في `assets/icon.svg`؛ بعد تعديلها شغّل `npm run icons` لتوليد أيقونات الـ PWA وAndroid.
+
+### هيكل المشروع
+```
+src/
+  core/      حلقة اللعبة (fixed timestep)، الحالة، الشبكة، توليد العوائق والتحقق من عدم الحبس
+  input/     السحب، لوحة المفاتيح، الأزرار على الشاشة
+  render/    الرسم، الثعبان، الخلفيات، الأشكال
+  fx/        الجزيئات، المؤثرات، جزيئات البيئة
+  audio/     المؤثرات الصوتية (Web Audio، بدون ملفات وبدون موسيقى)
+  ui/        القوائم، شريط المعلومات، اللافتات
+  storage/   الإعدادات وأعلى النتائج (localStorage)
+  platform/  الاهتزاز، دورة حياة التطبيق، زر الرجوع، المناطق الآمنة
+tests/       اختبارات الوحدة
+android/     مشروع Capacitor Android
+```
+
+## الخصوصية
+اللعبة لا تتصل بالإنترنت ولا تجمع أي بيانات. كل شيء (الإعدادات والنتائج) محفوظ على جهازك فقط.

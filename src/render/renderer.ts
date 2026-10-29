@@ -80,14 +80,15 @@ export class Renderer {
     const ft = fade ? fade.t : 1;
     const oldZone = fade ? game.zones[fade.from] : null;
 
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const { fx } = view;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, fx.shakeX * this.dpr, fx.shakeY * this.dpr);
     ctx.globalAlpha = 1;
     ctx.fillStyle = oldZone ? oldZone.palette.backdrop : zone.palette.backdrop;
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillRect(-40, -40, this.width + 80, this.height + 80);
     if (oldZone) {
       ctx.globalAlpha = ft;
       ctx.fillStyle = zone.palette.backdrop;
-      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.fillRect(-40, -40, this.width + 80, this.height + 80);
       ctx.globalAlpha = 1;
     }
 
@@ -139,6 +140,15 @@ export class Renderer {
       this.drawEffectRings(game);
     }
     ctx.restore();
+
+    fx.particles.draw(ctx);
+    fx.drawPopups(ctx);
+
+    if (fx.flash > 0) {
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.fillStyle = `rgba(${fx.flashColor},${fx.flash})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
   }
 
   cellCenter(p: Vec): { x: number; y: number } {

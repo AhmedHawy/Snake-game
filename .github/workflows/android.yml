@@ -1,0 +1,116 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version name
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION_NAME=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      # Accepts SDK licenses. The default package list includes the obsolete
+      # 'tools' package, which newer sdkmanager versions no longer provide.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Build signed release APK
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/SnakeRush-${VERSION_NAME}-debug.apk"
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk "out/SnakeRush-${VERSION_NAME}-release.apk"
+          fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SnakeRush-${{ env.VERSION_NAME }}-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      # Push to main -> rolling "latest-build" pre-release (stable download link).
+      # Tag v* -> a normal release for that version.
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            gh release create "$GITHUB_REF_NAME" out/*.apk \
+              --title "Snake Rush $GITHUB_REF_NAME" \
+              --notes "Snake Rush ${VERSION_NAME}" \
+              || gh release upload "$GITHUB_REF_NAME" out/*.apk --clobber
+          else
+            gh release delete latest-build --yes --cleanup-tag || true
+            gh release create latest-build out/*.apk \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Snake Rush – latest build (${VERSION_NAME})" \
+              --notes "Automatic build of ${GITHUB_SHA::7} from main. Install the *-release.apk if present, otherwise the *-debug.apk."
+          fi

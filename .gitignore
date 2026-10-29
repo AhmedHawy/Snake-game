@@ -1,0 +1,13 @@
+node_modules
+dist
+dev-dist
+*.log
+.DS_Store
+# Android build outputs
+android/app/build
+android/build
+android/.gradle
+android/local.properties
+android/app/release
+*.jks
+!android/app/debug.keystore

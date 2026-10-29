@@ -1,0 +1,58 @@
+:root {
+  --ui-bg: rgba(10, 14, 30, 0.82);
+  --ui-panel: #171c3a;
+  --ui-panel-2: #222a52;
+  --ui-text: #ffffff;
+  --ui-muted: #b9c0e6;
+  --accent: #b9f27c;
+  --accent-2: #ff5fa2;
+  --good: #3ddc84;
+  --danger: #ff4d5e;
+  --radius: 18px;
+  --font: 'Cairo', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0f3d1e;
+  color: var(--ui-text);
+  font-family: var(--font);
+  /* No zoom, no pull-to-refresh, no text selection, no callouts. */
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#game {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.hidden {
+  display: none !important;
+}

@@ -19,6 +19,8 @@ export interface DifficultyConfig {
   rivals: number;
   /** How eagerly bigger rivals chase the player (0..1). */
   rivalAggression: number;
+  /** Segments a rival gains per segment of food it eats (slower growth on easy). */
+  rivalGrowth: number;
   /** Chance (0..1) after eating an apple that a special item appears. */
   specialChance: number;
   /** Chance (0..1) after eating an apple that a poison item appears (0 = never). */
@@ -46,6 +48,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     movingObstacles: 0,
     rivals: 2,
     rivalAggression: 0.1,
+    rivalGrowth: 0.35,
     specialChance: 0.35,
     poisonChance: 0,
     goldenLifetimeMs: 14000,
@@ -64,6 +67,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     movingObstacles: 0,
     rivals: 3,
     rivalAggression: 0.3,
+    rivalGrowth: 0.6,
     specialChance: 0.3,
     poisonChance: 0,
     goldenLifetimeMs: 12000,
@@ -82,6 +86,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     movingObstacles: 0,
     rivals: 4,
     rivalAggression: 0.55,
+    rivalGrowth: 0.85,
     specialChance: 0.3,
     poisonChance: 0.2,
     goldenLifetimeMs: 8000,
@@ -100,6 +105,7 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     movingObstacles: 5,
     rivals: 5,
     rivalAggression: 0.8,
+    rivalGrowth: 1,
     specialChance: 0.3,
     poisonChance: 0.35,
     goldenLifetimeMs: 6000,

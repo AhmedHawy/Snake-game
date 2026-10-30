@@ -1,7 +1,8 @@
 // Snake skins. `body` returns the fill color of segment i (0 = head) of n.
 export type SkinId =
   | 'classic' | 'rainbow' | 'tiger' | 'neon' | 'candy' | 'ocean'
-  | 'dragon' | 'dragonJade' | 'dragonFrost' | 'dragonGold' | 'dragonShadow';
+  | 'zebra' | 'lava' | 'galaxy' | 'cobra'
+  | 'dragon' | 'dragonSea' | 'dragonJade' | 'dragonFrost' | 'dragonGold' | 'dragonShadow' | 'dragonCrystal' | 'dragonEmperor';
 
 export interface SkinConfig {
   id: SkinId;
@@ -75,6 +76,13 @@ const JADE = gradient(['#2ee59d', '#16a085', '#0e6655', '#1abc9c']);
 const FROST = gradient(['#f0fbff', '#9fdcff', '#4aa3d8', '#d6f1ff']);
 const GOLD = gradient(['#fff59d', '#ffd23f', '#f39c12', '#ffe082']);
 const SHADOW = gradient(['#5e2a9c', '#2d0a4e', '#120022', '#3d1470']);
+const SEA = gradient(['#48e5d0', '#1b9fc4', '#0a5f8a', '#38c7e0']);
+const LAVA = gradient(['#3a1a12', '#2a0f0a', '#4a1c10']);
+const LAVA_GLOW = gradient(['#ffdd55', '#ff7a1a', '#ff3b1f']);
+const GALAXY = gradient(['#7a5cff', '#2b1a6e', '#0b0b3a', '#3d1a6e', '#c04cff']);
+const COBRA = gradient(['#6b7a2a', '#4a5d23', '#2f3d14']);
+const CRYSTAL = gradient(['#ffd6f5', '#c9b8ff', '#9ff3ff', '#ffc4e8']);
+const EMPEROR = gradient(['#2b2b2b', '#111111', '#3a2a10']);
 
 export const SKINS: Record<SkinId, SkinConfig> = {
   classic: {
@@ -114,6 +122,35 @@ export const SKINS: Record<SkinId, SkinConfig> = {
     head: '#d7261e', outline: '#3a0505', eyeWhite: '#ffd23f', pupil: '#2a0000',
     dragon: { horn: '#f5deb3', spine: '#ff8c1a' },
   },
+  dragonSea: {
+    id: 'dragonSea', nameKey: 'skin.dragonSea',
+    // Free sea dragon: turquoise body, silver whiskers and scales, fin frills.
+    body: (i, n) => (i % 3 === 1 ? '#0e4f74' : pick(SEA, along(i, n))),
+    head: '#2ec4d6', outline: '#06324a', eyeWhite: '#fff6b0', pupil: '#002030',
+    dragon: { horn: '#e0f7ff', spine: '#7ff0ff', hornSize: 0.9, whiskers: '#e0f7ff', scales: '#c8f4ff' },
+  },
+  zebra: {
+    id: 'zebra', nameKey: 'skin.zebra', unlockAt: 300,
+    body: (i) => (i % 2 === 0 ? '#f5f5f5' : '#1b1b1b'),
+    head: '#f5f5f5', outline: '#000000', eyeWhite: '#ffffff', pupil: '#000000',
+  },
+  lava: {
+    id: 'lava', nameKey: 'skin.lava', unlockAt: 1500,
+    // Dark rock with glowing cracks that slowly flow down the body.
+    body: (i, n, t) => ((i + Math.floor(t / 180)) % 4 === 0 ? pick(LAVA_GLOW, along(i, n)) : pick(LAVA, along(i, n))),
+    head: '#ff7a1a', outline: '#1a0500', eyeWhite: '#ffdd55', pupil: '#3a0000', emissive: 0.25,
+  },
+  galaxy: {
+    id: 'galaxy', nameKey: 'skin.galaxy', unlockAt: 3500,
+    // Deep space colors with twinkling stars.
+    body: (i, n, t) => ((i * 7 + Math.floor(t / 220)) % 9 === 0 ? '#ffffff' : pick(GALAXY, along(i, n))),
+    head: '#7a5cff', outline: '#05021a', eyeWhite: '#ffffff', pupil: '#05021a', emissive: 0.2,
+  },
+  cobra: {
+    id: 'cobra', nameKey: 'skin.cobra', unlockAt: 6500,
+    body: (i, n) => (i % 5 === 0 ? '#f1c40f' : pick(COBRA, along(i, n))),
+    head: '#6b7a2a', outline: '#1a2208', eyeWhite: '#ffe066', pupil: '#000000',
+  },
   dragonJade: {
     id: 'dragonJade', nameKey: 'skin.dragonJade', unlockAt: 1000,
     // Eastern dragon: green-jade body, golden whiskers and scales, red mane.
@@ -139,9 +176,25 @@ export const SKINS: Record<SkinId, SkinConfig> = {
     head: '#2d0a4e', outline: '#000000', eyeWhite: '#ff1744', pupil: '#2a0000', emissive: 0.2,
     dragon: { horn: '#b388ff', spine: '#d500f9', hornSize: 1.5, headSize: 1.2, whiskers: '#d500f9', scales: '#6a1b9a' },
   },
+  dragonCrystal: {
+    id: 'dragonCrystal', nameKey: 'skin.dragonCrystal', unlockAt: 12000,
+    body: (i, n, t) => (i % 3 === 1 ? '#ffffff' : pick(CRYSTAL, (along(i, n) + t / 6000) % 1)),
+    head: '#ffd6f5', outline: '#6a4c9c', eyeWhite: '#9ff3ff', pupil: '#2a0a4e', emissive: 0.3,
+    dragon: { horn: '#9ff3ff', spine: '#ff9ff3', hornSize: 1.7, headSize: 1.1, whiskers: '#ffffff', scales: '#e0fbff' },
+  },
+  dragonEmperor: {
+    id: 'dragonEmperor', nameKey: 'skin.dragonEmperor', unlockAt: 20000,
+    body: (i, n) => (i % 3 === 1 ? '#d4a017' : pick(EMPEROR, along(i, n))),
+    head: '#1a1a1a', outline: '#000000', eyeWhite: '#ffd23f', pupil: '#8b0000',
+    dragon: { horn: '#ffd23f', spine: '#ff1f1f', hornSize: 1.9, headSize: 1.3, whiskers: '#ff1f1f', scales: '#ffd23f' },
+  },
 };
 
-export const SKIN_ORDER: SkinId[] = ['classic', 'dragon', 'rainbow', 'tiger', 'neon', 'candy', 'ocean', 'dragonJade', 'dragonFrost', 'dragonGold', 'dragonShadow'];
+export const SKIN_ORDER: SkinId[] = [
+  'classic', 'dragon', 'dragonSea', 'rainbow', 'tiger', 'neon', 'candy', 'ocean',
+  // Unlocked by total points, cheapest first.
+  'zebra', 'dragonJade', 'lava', 'dragonFrost', 'galaxy', 'dragonGold', 'cobra', 'dragonShadow', 'dragonCrystal', 'dragonEmperor',
+];
 
 /** Skins the player can pick with this many total points. */
 export const isUnlocked = (id: SkinId, totalPoints: number): boolean => totalPoints >= (SKINS[id].unlockAt ?? 0);

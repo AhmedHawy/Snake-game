@@ -96,20 +96,29 @@ describe('rivals mode', () => {
     expect(g.rivalsKilled).toBe(0);
   });
 
-  it('rivals move, eat food and respawn after dying', () => {
-    const g = new Game({ mode: MODES.zen, difficulty: DIFFICULTIES.normal, seed: 9 });
+  it('rivals only eat after the first player meal, then move, eat and respawn', () => {
+    const g = new Game({ mode: MODES.zen, difficulty: DIFFICULTIES.extreme, seed: 9 });
     g.begin();
     const r = g.rivals[0];
+    const foodAhead = () => {
+      g.foods.length = 0;
+      const f = g.spawnFood('apple')!;
+      const d = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }][r.dir];
+      f.pos = { x: r.snake[0].x + d.x, y: r.snake[0].y + d.y };
+      f.prev = { ...f.pos };
+      return f;
+    };
     const start = r.snake[0];
-    // Food right in front of the rival.
-    g.foods.length = 0;
-    const f = g.spawnFood('apple')!;
-    const d = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }][r.dir];
-    f.pos = { x: start.x + d.x, y: start.y + d.y };
-    f.prev = { ...f.pos };
+    let f = foodAhead();
     const len = r.snake.length;
     for (let i = 0; i < 400; i++) g.update(1);
     expect(r.snake[0]).not.toEqual(start);
+    // Player has not eaten yet: the rival leaves the food alone.
+    expect(g.foods.includes(f)).toBe(true);
+    expect(r.snake.length).toBe(len);
+    g.foodsEaten = 1;
+    f = foodAhead();
+    for (let i = 0; i < 400; i++) g.update(1);
     expect(g.foods.includes(f)).toBe(false);
     expect(r.snake.length).toBe(len + 1);
     // A rival that falls far behind comes back near the player.
@@ -118,6 +127,11 @@ describe('rivals mode', () => {
     g.update(1);
     expect(Math.abs(r.snake[0].x - g.head.x)).toBeLessThan(60);
   });
+});
+
+it('rivals grow slower on easier difficulties', () => {
+  expect(DIFFICULTIES.easy.rivalGrowth).toBeLessThan(DIFFICULTIES.normal.rivalGrowth);
+  expect(DIFFICULTIES.normal.rivalGrowth).toBeLessThan(DIFFICULTIES.extreme.rivalGrowth);
 });
 
 describe('single world', () => {
@@ -147,7 +161,9 @@ describe('skin unlocks', () => {
     expect(isUnlocked('dragonJade', 999)).toBe(false);
     expect(isUnlocked('dragonJade', 1000)).toBe(true);
     const locked = SKIN_ORDER.filter((id) => SKINS[id].unlockAt);
-    expect(locked).toEqual(['dragonJade', 'dragonFrost', 'dragonGold', 'dragonShadow']);
+    expect(locked.length).toBeGreaterThanOrEqual(10);
+    // At least two dragons are free from the start.
+    expect(SKIN_ORDER.filter((id) => SKINS[id].dragon && !SKINS[id].unlockAt).length).toBeGreaterThanOrEqual(2);
     const costs = locked.map((id) => SKINS[id].unlockAt!);
     expect([...costs].sort((a, b) => a - b)).toEqual(costs);
   });

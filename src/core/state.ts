@@ -72,6 +72,8 @@ export interface Rival {
   prevSnake: Vec[];
   dir: Dir;
   pendingGrow: number;
+  /** Fractional growth carried over (rivals grow slower on easy). */
+  growCredit: number;
   moveTimer: number;
   skin: SkinId;
   alive: boolean;
@@ -480,6 +482,11 @@ export class Game {
 
   // --------------------------------------------------------------- rivals
 
+  /** Rivals only start eating after the player's first meal. */
+  get rivalsCanEat(): boolean {
+    return this.foodsEaten > 0;
+  }
+
   rivalAt(x: number, y: number): Rival | undefined {
     const k = cellKey(x, y);
     for (const r of this.rivals) if (r.alive && r.cells.has(k)) return r;
@@ -494,6 +501,7 @@ export class Game {
       prevSnake: [],
       dir: 0,
       pendingGrow: 0,
+      growCredit: 0,
       moveTimer: this.rng.next() * 100,
       skin: skins[index % skins.length],
       alive: false,
@@ -618,7 +626,7 @@ export class Game {
     let target: Vec | null = null;
     let best = Infinity;
     for (const f of this.foods) {
-      if (!isBasic(f.type)) continue;
+      if (!this.rivalsCanEat || !isBasic(f.type)) continue;
       const d = manhattan(f.pos, head);
       if (d < best && d < 20 && d + 3 < manhattan(f.pos, this.head)) {
         best = d;
@@ -677,9 +685,12 @@ export class Game {
       subCount(r.cells, cellKey(t.x, t.y));
     }
     const food = this.foodAt(nx, ny);
-    if (food && isBasic(food.type)) {
+    if (food && isBasic(food.type) && this.rivalsCanEat) {
       this.foods.splice(this.foods.indexOf(food), 1);
-      r.pendingGrow += FOODS[food.type].grow;
+      r.growCredit += FOODS[food.type].grow * this.diff.rivalGrowth;
+      const whole = Math.floor(r.growCredit);
+      r.growCredit -= whole;
+      r.pendingGrow += whole;
       this.ensureApple();
     }
   }

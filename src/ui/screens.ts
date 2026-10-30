@@ -8,6 +8,7 @@ import { SKINS, SKIN_ORDER, isUnlocked, type SkinId } from '../config/skins';
 import { ZONES } from '../config/zones';
 import { drawSkinPreview } from '../render/preview';
 import { ABILITIES } from '../config/abilities';
+import { LEVEL_XP, MAX_LEVEL, levelFor, nextLevelXp } from '../config/levels';
 import type { Settings } from '../storage/storage';
 import { ICONS, h } from './dom';
 
@@ -24,6 +25,8 @@ export interface GameOverStats {
   rivalsKilled?: number;
   /** Rivals beaten by the ally. */
   allyKills?: number;
+  /** The dragon reached a new level this run. */
+  levelUp?: { skin: SkinId; level: number };
   /** Skins unlocked by this run's points. */
   unlocked: SkinId[];
 }
@@ -41,6 +44,8 @@ export interface UiHost {
   bestFor(mode: ModeId, diff: DifficultyId): number;
   /** Points collected over all runs (unlocks skins). */
   totalPoints(): number;
+  /** A dragon's experience (its level makes its breath stronger). */
+  dragonXp(id: SkinId): number;
   /** An exit button is only offered inside the installed Android app. */
   readonly canExit: boolean;
   exit(): void;
@@ -297,6 +302,7 @@ export class Screens {
             cv,
             h('span', { text: t(SKINS[id].nameKey as I18nKey) }),
             h('small', { class: 'ability', text: `${ab.icon} ${t(ab.nameKey as I18nKey)}` }),
+            open ? this.levelBadge(id) : null,
             open ? null : h('small', { class: 'lock', text: t('skins.locked', { n: need }) }),
             open ? null : h('span', { class: 'lock-bar', style: { width: `${Math.min(100, (total / need) * 100)}%` } }),
           );
@@ -310,6 +316,21 @@ export class Screens {
     };
     this.previewRaf = requestAnimationFrame(anim);
     return h('div', { class: 'panel' }, this.header('menu.skins', 'main'), h('div', { class: 'total-points', text: `⭐ ${t('skins.total', { n: total })}` }), grid);
+  }
+
+  /** Level stars and progress to the next level. */
+  private levelBadge(id: SkinId): HTMLElement {
+    const xp = this.host.dragonXp(id);
+    const level = levelFor(xp);
+    const next = nextLevelXp(level);
+    const prev = LEVEL_XP[level - 1];
+    const frac = next === null ? 1 : (xp - prev) / (next - prev);
+    return h(
+      'small',
+      { class: 'level' },
+      h('span', { text: `${'★'.repeat(level)}${'☆'.repeat(MAX_LEVEL - level)} ${next === null ? t('level.max') : t('level.short', { n: level })}` }),
+      h('span', { class: 'xp-bar' }, h('i', { style: { width: `${Math.round(frac * 100)}%` } })),
+    );
   }
 
   private toggle(labelKey: I18nKey, value: boolean, onChange: (v: boolean) => void): HTMLElement {
@@ -445,6 +466,7 @@ export class Screens {
         s.rivalsKilled !== undefined ? stat('over.rivals', `⚔️ ${s.rivalsKilled}`) : null,
         s.allyKills ? stat('over.allyKills', `🤝 ${s.allyKills}`) : null,
       ),
+      s.levelUp ? h('div', { class: 'new-best unlocked', text: `⭐ ${t('over.levelUp', { name: t(SKINS[s.levelUp.skin].nameKey as I18nKey), n: s.levelUp.level })}` }) : null,
       ...s.unlocked.map((id) => h('div', { class: 'new-best unlocked', text: `🎉 ${t('over.unlocked', { name: t(SKINS[id].nameKey as I18nKey) })}` })),
       h('div', { class: 'grid2' }, this.button(t('over.retry'), () => this.host.restart(), 'btn-play'), this.button(t('over.menu'), () => this.host.toMenu())),
     );

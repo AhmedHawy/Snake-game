@@ -79,6 +79,7 @@ interface Entry {
   skin: SkinId;
   len: number;
   kind: Kind;
+  boss?: boolean;
 }
 
 export class Portraits {
@@ -114,7 +115,7 @@ export class Portraits {
       if (!r.alive) continue;
       const len = r.snake.length;
       if (r.ally) ally = { skin: r.skin, len, kind: 'ally' };
-      else enemies.push({ skin: r.skin, len, kind: game.isEdible(r) ? 'edible' : len <= game.snake.length ? 'prey' : 'threat' });
+      else enemies.push({ skin: r.skin, len, kind: game.isEdible(r) ? 'edible' : len <= game.snake.length ? 'prey' : 'threat', boss: r.boss });
     }
     const me: Entry = { skin: game.playerSkin, len: game.snake.length, kind: 'player' };
     const key = JSON.stringify([enemies, ally, me]);
@@ -131,7 +132,7 @@ export class Portraits {
   private portrait(e: Entry): HTMLElement {
     return h(
       'div',
-      { class: `portrait ${e.kind}` },
+      { class: `portrait ${e.kind}${e.boss ? ' boss' : ''}` },
       h('span', { class: 'portrait-ring' }, h('img', { attrs: { src: headIcon(e.skin), alt: '' } })),
       h('b', { text: String(e.len) }),
     );

@@ -138,14 +138,15 @@ export class Fx {
   }
 
   /** Dragon breath: a burst of the ability's particles over the cells it hits. */
-  onBreath(ability: AbilityId, from: Vec, dir: Dir, cells: Vec[], targets: Vec[], strong: boolean): void {
+  onBreath(ability: AbilityId, from: Vec, dir: Dir, cells: Vec[], targets: Vec[], strong: boolean, real: boolean): void {
     const ab = ABILITIES[ability];
     const p = this.particles;
     const d = DIRS[dir];
     const mx = from.x + d.x * 0.55;
     const mz = from.y + d.y * 0.55;
     const col = (k: number) => ab.colors[k % ab.colors.length];
-    const scale = strong ? 1.35 : 1;
+    // The after-meal show-off breath is lighter than a fired one.
+    const scale = (strong ? 1.35 : 1) * (real ? 1 : 0.45);
     if (ab.shape === 'ring') {
       // Expanding shockwave from the dragon in every direction.
       const n = Math.round(70 * scale);
@@ -178,7 +179,7 @@ export class Fx {
         const dx = c.x - mx;
         const dz = c.y - mz;
         const dist = Math.hypot(dx, dz) || 1;
-        const n = Math.round((ab.shape === 'point' ? 4 : 6) * scale);
+        const n = Math.max(1, Math.round((ab.shape === 'point' ? 4 : 6) * scale));
         for (let k = 0; k < n; k++) {
           const u = Math.random();
           const life = 380 + Math.random() * 260;
@@ -203,6 +204,7 @@ export class Fx {
         }
       }
     }
+    if (!real) return;
     this.headPop = 1;
     this.popup(from.x, 1.5, from.y, ab.icon, '#ffffff', strong ? 34 : 26);
     if (strong || ability === 'royal') this.addShake(0.35);

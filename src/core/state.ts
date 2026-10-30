@@ -65,7 +65,9 @@ export type GameEvent =
   | { type: 'expire'; food: FoodItem }
   | { type: 'spawn'; food: FoodItem }
   | { type: 'rivalKilled'; rival: Rival; cells: Vec[]; byPlayer: boolean; points: number }
-  | { type: 'breath'; ability: AbilityId; from: Vec; dir: Dir; cells: Vec[]; targets: Vec[]; strong: boolean }
+  /** `real`: fired on purpose (hits things); otherwise the after-meal show-off breath. */
+  | { type: 'breath'; ability: AbilityId; from: Vec; dir: Dir; cells: Vec[]; targets: Vec[]; strong: boolean; real: boolean }
+  | { type: 'charge'; charges: number; strong: boolean }
   | { type: 'rivalHit'; rival: Rival; removed: Vec[]; points: number }
   | { type: 'smash'; cells: Vec[]; points: number }
   | { type: 'wave'; wave: number }
@@ -122,6 +124,8 @@ const MAX_RIVALS = 8;
 export const SPRINT_MS = 1500;
 export const SPRINT_MAX_MS = 3000;
 export const SPRINT_FACTOR = 1.4;
+/** Breath charges the player can store (one per meal). */
+export const MAX_CHARGES = 3;
 /** Points for each obstacle cell broken by a breath. */
 const SMASH_POINTS = 5;
 
@@ -204,6 +208,10 @@ export class Game {
   hazards = new Map<number, Hazard>();
   /** Obstacle cells broken by breaths (counted for the stats). */
   smashed = 0;
+  /** Stored breath attacks (fired with the ability button / double tap). Start with one to try it. */
+  charges = 1;
+  /** The next fired breath is a super breath (golden star). */
+  strongCharge = false;
   /** Player skin (rivals avoid wearing the same one). */
   playerSkin: SkinId = 'classic';
   events: GameEvent[] = [];
@@ -488,7 +496,11 @@ export class Game {
     this.events.push({ type: 'eat', food, points, multiplier: mult });
 
     if (cfg.countsAsFood) {
-      this.breathe(food.type === 'golden');
+      // Every meal: a show-off breath, and one stored attack charge.
+      this.breathe(false, false);
+      this.charges = Math.min(MAX_CHARGES, this.charges + 1);
+      if (food.type === 'golden') this.strongCharge = true;
+      this.events.push({ type: 'charge', charges: this.charges, strong: this.strongCharge });
       this.foodsEaten++;
       if (this.mode.zones && this.foodsEaten % FOODS_PER_ZONE === 0) this.advanceZone();
     }
@@ -753,12 +765,29 @@ export class Game {
     return cells;
   }
 
-  /** Dragon breath after every meal: breaks obstacles and (Rivals mode) weakens rivals. */
-  private breathe(strong: boolean): void {
+  /** Fires a stored breath (ability button / double tap). Returns false when there is no charge. */
+  fireBreath(): boolean {
+    if (this.status !== 'playing' || this.charges <= 0) return false;
+    this.charges--;
+    const strong = this.strongCharge;
+    this.strongCharge = false;
+    this.breathe(strong, true);
+    return true;
+  }
+
+  /**
+   * Dragon breath. A real breath breaks obstacles and (Rivals mode) weakens
+   * rivals; the after-meal breath is only for show.
+   */
+  private breathe(strong: boolean, real: boolean): void {
     const ab = this.ability;
     const h = this.head;
     const d = DIRS[this.dir];
     const cells = this.breathCells(ab, strong);
+    if (!real) {
+      this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets: [], strong, real });
+      return;
+    }
 
     // Smash obstacles and moving obstacles in the way.
     const smashed: Vec[] = [];
@@ -798,7 +827,7 @@ export class Game {
       }
     }
 
-    this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets, strong });
+    this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets, strong, real });
     if (smashed.length) {
       const points = smashed.length * SMASH_POINTS;
       this.score += points;

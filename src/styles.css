@@ -852,3 +852,78 @@ button {
   color: #ffd98a;
   opacity: 0.9;
 }
+
+/* ---------- Ability (breath) button ---------- */
+.ability-btn {
+  position: absolute;
+  z-index: 3;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  background: radial-gradient(circle at 35% 30%, #ff9a3c, #d7261e 70%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 18px rgba(255, 140, 40, 0.65);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.08s ease-out, filter 0.2s;
+}
+.ability-btn:active {
+  transform: scale(0.9);
+}
+.ability-btn .ab-icon {
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4));
+}
+.ability-btn .ab-pips {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+}
+.ability-btn .ab-pips i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+}
+.ability-btn .ab-pips i.on {
+  background: #ffd23f;
+  box-shadow: 0 0 6px #ffd23f;
+}
+.ability-btn.empty {
+  filter: grayscale(0.9) brightness(0.7);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.ability-btn.strong {
+  border-color: #ffd23f;
+  animation: abStrong 0.8s ease-in-out infinite alternate;
+}
+.ability-btn.charged {
+  animation: abCharged 0.35s ease-out;
+}
+.ability-btn.strong.charged {
+  animation: abCharged 0.35s ease-out, abStrong 0.8s 0.35s ease-in-out infinite alternate;
+}
+.ability-btn.denied {
+  animation: abDenied 0.3s ease-in-out;
+}
+@keyframes abCharged {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes abStrong {
+  from { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 10px #ffd23f; }
+  to { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 30px #ffd23f, 0 0 50px rgba(255, 210, 63, 0.6); }
+}
+@keyframes abDenied {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}

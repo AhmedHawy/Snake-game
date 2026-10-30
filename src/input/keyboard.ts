@@ -5,6 +5,8 @@ export interface KeyboardHandlers {
   onDir: (d: Dir) => void;
   onPause: () => void;
   onMute: () => void;
+  /** Fire the dragon's breath (F / Enter). */
+  onFire: () => void;
 }
 
 const DIR_KEYS: Record<string, Dir> = {
@@ -26,6 +28,9 @@ export function bindKeyboard(h: KeyboardHandlers): () => void {
     } else if (e.code === 'Escape' || e.code === 'KeyP' || e.code === 'Space') {
       e.preventDefault();
       h.onPause();
+    } else if (e.code === 'KeyF' || e.code === 'Enter') {
+      e.preventDefault();
+      h.onFire();
     } else if (e.code === 'KeyM') {
       h.onMute();
     }

@@ -24,6 +24,7 @@ import { addPoints, bestScore, loadSettings, saveSettings, submitScore, totalPoi
 import { hideZoneBanner, showBanner, showZoneBanner } from './ui/banner';
 import type { AbilityId } from './config/abilities';
 import { Hud } from './ui/hud';
+import { AbilityButton } from './ui/abilityButton';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
 
@@ -33,6 +34,7 @@ const ZONE_FADE_MS = 1400;
 /** Crash: slow-mo + scattering pieces before the Game Over panel. */
 const DEATH_SEQUENCE_MS = 1300;
 const BACK_EXIT_WINDOW_MS = 2000;
+const DOUBLE_TAP_MS = 320;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -46,6 +48,8 @@ export class App implements UiHost {
   private readonly screens = new Screens($('overlay'), this);
   private readonly dpad = new DPad($('dpad'), (d) => this.steer(d, true));
   private readonly hint = $('hint');
+  private readonly abilityBtn = new AbilityButton($('app'), () => this.fire());
+  private lastTapMs = 0;
   private game!: Game;
   private layout!: BoardLayout;
   private zoneFade: { from: number; t: number } | null = null;
@@ -85,13 +89,23 @@ export class App implements UiHost {
       deadZone: () => 16,
       onDir: (d, dx, dy) => this.steer(d, false, leanOf(d, dx, dy)),
       onTap: () => {
-        if (this.canPlay) this.game.begin();
+        if (!this.canPlay) return;
+        // Double tap fires the dragon's breath.
+        const now = performance.now();
+        if (this.game.status === 'playing' && now - this.lastTapMs < DOUBLE_TAP_MS) {
+          this.lastTapMs = 0;
+          this.fire();
+          return;
+        }
+        this.lastTapMs = now;
+        this.game.begin();
       },
     });
     bindKeyboard({
       onDir: (d) => this.steer(d, false),
       onPause: () => (this.inGame ? this.togglePause() : this.screens.back()),
       onMute: () => this.toggleMute(),
+      onFire: () => this.fire(),
     });
     // Unlock audio on the first user gesture (autoplay policy).
     const unlock = () => this.sfx.unlock();
@@ -225,6 +239,16 @@ export class App implements UiHost {
     if (this.game.steer(d, lean) && fromDpad) haptics.tap();
   }
 
+  /** Fires a stored breath (ability button, double tap, F / Enter). */
+  private fire(): void {
+    if (!this.canPlay || this.game.status !== 'playing') return;
+    if (this.game.fireBreath()) haptics.powerUp();
+    else {
+      this.abilityBtn.denied();
+      haptics.tap();
+    }
+  }
+
   private pause(): void {
     if (!this.inGame || this.paused) return;
     if (this.game.status !== 'playing' && this.game.status !== 'ready') return;
@@ -318,6 +342,9 @@ export class App implements UiHost {
 
   private syncDpad(): void {
     this.dpad.place(this.layout.dpadRect, this.inGame && this.settings.dpad);
+    // The ability button sits in the board corner away from the D-pad.
+    this.abilityBtn.place(this.layout.area, this.settings.dpad && this.settings.dpadSide === 'right' ? 'left' : 'right');
+    this.abilityBtn.show(this.inGame);
   }
 
   private onResize(): void {
@@ -445,8 +472,8 @@ export class App implements UiHost {
           break;
         }
         case 'breath':
-          this.fx.onBreath(e.ability, e.from, e.dir, e.cells, e.targets, e.strong);
-          this.sfx.breath(BREATH_SOUND[e.ability]);
+          this.fx.onBreath(e.ability, e.from, e.dir, e.cells, e.targets, e.strong, e.real);
+          if (e.real) this.sfx.breath(BREATH_SOUND[e.ability]);
           break;
         case 'rivalHit': {
           const rs = SKINS[e.rival.skin];
@@ -521,7 +548,11 @@ export class App implements UiHost {
       zoneFade: this.zoneFade,
       showArrow: this.inGame && !this.paused && g.status === 'playing',
     });
-    if (this.inGame) this.hud.update(g, this.best);
+    if (this.inGame) {
+      this.hud.update(g, this.best);
+      const ab = g.ability;
+      this.abilityBtn.update(ab.icon, ab.colors[0], g.charges, g.strongCharge);
+    }
     const showHint = this.inGame && !this.paused && g.status === 'ready' && this.screens.current === 'none';
     if (showHint === this.hint.classList.contains('hidden')) {
       this.hint.textContent = t(matchMedia('(pointer: fine)').matches ? 'hud.swipeDesktop' : 'hud.swipe');

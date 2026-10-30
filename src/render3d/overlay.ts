@@ -33,6 +33,7 @@ export class Overlay {
     flash: number,
     apple: ScreenPoint | null,
     rect: { x: number; y: number; w: number; h: number },
+    emoji: string,
   ): void {
     while (this.pool.length < popups.length) {
       const el = document.createElement('div');
@@ -88,6 +89,8 @@ export class Overlay {
         (this.arrow.firstElementChild as HTMLElement).style.transform = `rotate(${angle}deg)`;
       }
     }
+    const label = this.arrow.lastElementChild as HTMLElement;
+    if (label.textContent !== emoji) label.textContent = emoji;
     this.arrow.classList.toggle('hidden', !show);
   }
 

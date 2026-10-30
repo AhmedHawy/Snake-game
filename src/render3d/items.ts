@@ -13,7 +13,7 @@ import {
   TorusGeometry,
   type BufferGeometry,
 } from 'three';
-import { EFFECT_COLORS, FOODS, type FoodType, type TimedEffect } from '../config/food';
+import { EFFECT_COLORS, FOODS, isBasic, type FoodType, type TimedEffect } from '../config/food';
 import { TIMED_EFFECTS, type FoodItem, type Game } from '../core/state';
 import { buildFoodModel, type FoodModel } from './models';
 import { blobShadowTexture } from './snake';
@@ -57,9 +57,10 @@ interface FoodView {
   root: Group;
   model: Mesh;
   ring: Mesh | null;
+  halo: Mesh;
+  /** Expanding "here I am" ring under everyday food. */
+  beacon: Mesh | null;
 }
-
-const SPECIAL_GLOW: Partial<Record<FoodType, true>> = { golden: true, speed: true, magnet: true, ghost: true, slow: true, shrink: true };
 
 export class Items3D {
   readonly group = new Group();
@@ -90,10 +91,8 @@ export class Items3D {
         transparent: model.opacity < 1,
         opacity: model.opacity,
       });
-      if (model.emissive > 0) {
-        mat.emissive = new Color(FOODS[type].color);
-        mat.emissiveIntensity = model.emissive;
-      }
+      mat.emissive = new Color(FOODS[type].color);
+      mat.emissiveIntensity = model.emissive;
       t = { model, mat };
       this.models.set(type, t);
     }
@@ -109,13 +108,18 @@ export class Items3D {
     shadow.scale.setScalar(0.8);
     shadow.position.y = 0.011;
     root.add(shadow);
-    if (SPECIAL_GLOW[f.type]) {
-      const halo = new Mesh(
-        new CircleGeometry(0.62, 24).rotateX(-Math.PI / 2),
-        new MeshBasicMaterial({ map: glowTexture(), color: FOODS[f.type].color, transparent: true, opacity: 0.55, blending: AdditiveBlending, depthWrite: false }),
-      );
-      halo.position.y = 0.02;
-      root.add(halo);
+    // Every food gets a soft glow so it stands out, even in dark zones.
+    const halo = new Mesh(
+      new CircleGeometry(0.75, 24).rotateX(-Math.PI / 2),
+      new MeshBasicMaterial({ map: glowTexture(), color: isBasic(f.type) ? '#fff3c4' : FOODS[f.type].color, transparent: true, opacity: 0.55, blending: AdditiveBlending, depthWrite: false }),
+    );
+    halo.position.y = 0.02;
+    root.add(halo);
+    let beacon: Mesh | null = null;
+    if (isBasic(f.type)) {
+      beacon = new Mesh(flatRing(0.42, 0.5, 40), new MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.6, depthWrite: false, blending: AdditiveBlending }));
+      beacon.position.y = 0.03;
+      root.add(beacon);
     }
     let ring: Mesh | null = null;
     if (Number.isFinite(f.expiresMs)) {
@@ -124,10 +128,12 @@ export class Items3D {
       root.add(ring);
     }
     this.group.add(root);
-    return { root, model, ring };
+    return { root, model, ring, halo, beacon };
   }
 
-  update(game: Game, alpha: number, timeMs: number, headX: number, headZ: number, showEffectRings: boolean): void {
+  /** `dark` boosts food glow in dark zones (volcano, neon, space...). */
+  update(game: Game, alpha: number, timeMs: number, headX: number, headZ: number, showEffectRings: boolean, dark: boolean): void {
+    for (const t of this.models.values()) t.mat.emissiveIntensity = dark ? Math.max(0.55, t.model.emissive) : t.model.emissive;
     // Foods: create / update / remove.
     const alive = new Set<number>();
     for (const f of game.foods) {
@@ -145,7 +151,8 @@ export class Items3D {
       v.root.position.set(x, 0, z);
       v.model.position.y = 0.42 + bob;
       v.model.rotation.y = timeMs / 700 + f.id;
-      v.model.scale.setScalar(appear * (1 + 0.05 * Math.sin(timeMs / 200 + f.id)));
+      const size = f.type === 'mouse' ? 1.35 : isBasic(f.type) ? 1.15 : 1;
+      v.model.scale.setScalar(size * appear * (1 + 0.05 * Math.sin(timeMs / 200 + f.id)));
       let visible = true;
       if (v.ring) {
         const left = f.expiresMs - game.timeMs;
@@ -154,6 +161,13 @@ export class Items3D {
         if (left < 1500) visible = Math.sin(timeMs / 55) > -0.3;
       }
       v.model.visible = visible;
+      const glowBoost = dark ? 1 : 0.6;
+      (v.halo.material as MeshBasicMaterial).opacity = glowBoost * (0.55 + 0.2 * Math.sin(timeMs / 220 + f.id));
+      if (v.beacon) {
+        const p = ((timeMs + f.id * 300) % 1400) / 1400;
+        v.beacon.scale.setScalar(0.7 + p * 1.1);
+        (v.beacon.material as MeshBasicMaterial).opacity = (1 - p) * (dark ? 0.9 : 0.55);
+      }
     }
     for (const [id, v] of this.foods) {
       if (!alive.has(id)) {

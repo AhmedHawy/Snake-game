@@ -66,8 +66,6 @@ export interface SceneryConfig {
   creatureCount: number;
   /** Soft cloud shadows drifting over the ground. */
   cloudShadows: boolean;
-  /** Sun rays through the water. */
-  lightRays?: boolean;
   /** Huge planets and moons far below a see-through ground (parallax depth). */
   planets?: boolean;
 }
@@ -150,7 +148,7 @@ export const ZONES: ZoneConfig[] = [
     light: { sky: '#9fe8ff', ground: '#06324a', hemi: 1.4, sun: 1.6 },
     decor: ['shell', 'starfish', 'seaweed', 'urchin'], decorPerChunk: 50,
     checker: false,
-    scenery: { tall: ['kelp', 'coralFan', 'brainCoral', 'chest'], tallPerChunk: 11, creatures: ['fish', 'jellyfish'], creatureCount: 14, cloudShadows: false, lightRays: true },
+    scenery: { tall: ['kelp', 'coralFan', 'brainCoral', 'chest'], tallPerChunk: 11, creatures: ['fish', 'jellyfish'], creatureCount: 14, cloudShadows: false },
   },
   {
     id: 'snow',

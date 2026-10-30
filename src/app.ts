@@ -2,6 +2,7 @@
 // input, UI and persistence together.
 import { Sfx } from './audio/sfx';
 import { DIFFICULTIES, type DifficultyId } from './config/difficulty';
+import { isBasic } from './config/food';
 import { setLang, t, type I18nKey } from './config/i18n';
 import { MODES, type ModeId } from './config/modes';
 import { SKINS } from './config/skins';
@@ -367,7 +368,7 @@ export class App implements UiHost {
           if (ty === 'golden') this.sfx.golden();
           else if (ty === 'poison') this.sfx.poison();
           else if (ty === 'shrink') this.sfx.shrink();
-          else if (ty === 'apple') this.sfx.eat();
+          else if (isBasic(ty)) this.sfx.eat();
           if (ty === 'poison') haptics.bad();
           else haptics.eat();
           if (ty === 'shrink' || ty === 'poison') {

@@ -13,6 +13,8 @@ import {
   SPECIAL_TYPES,
   SPEED_BOOST_FACTOR,
   SPEED_POINTS_MULT,
+  BASIC_TYPES,
+  isBasic,
   type FoodType,
   type TimedEffect,
 } from '../config/food';
@@ -263,7 +265,8 @@ export class Game {
       teleported = true;
     }
 
-    if (this.isBlocked(nx, ny) || this.moverAt(nx, ny)) return this.crash({ x: nx, y: ny });
+    // Ghost lets the snake pass through obstacles and its own body.
+    if (this.effects.ghost <= 0 && (this.isBlocked(nx, ny) || this.moverAt(nx, ny))) return this.crash({ x: nx, y: ny });
 
     if (this.effects.ghost <= 0 && !this.mode.noDeath) {
       // The tail cell frees up this step unless the snake is growing.
@@ -347,14 +350,14 @@ export class Game {
       if (this.mode.zones && this.foodsEaten % FOODS_PER_ZONE === 0) this.advanceZone();
     }
 
-    if (food.type === 'apple') {
+    if (isBasic(food.type)) {
       this.ensureApple();
       this.maybeSpawnSpecials();
     }
 
     if (!cfg.harmful) {
       // Combo window: distance to the nearest apple plus some slack.
-      const apple = this.foods.find((f) => f.type === 'apple');
+      const apple = this.foods.find((f) => isBasic(f.type));
       const dist = apple ? manhattan(this.head, apple.pos) : 0;
       const slack = Math.round(this.viewRadius * 5 * this.diff.comboSlackFactor);
       this.comboWindow = Math.max(4, dist + slack);
@@ -468,7 +471,7 @@ export class Game {
   // ------------------------------------------------------------------ food
 
   private maybeSpawnSpecials(): void {
-    const hasSpecial = this.foods.some((f) => f.type !== 'apple' && f.type !== 'poison');
+    const hasSpecial = this.foods.some((f) => !isBasic(f.type) && f.type !== 'poison');
     if (!hasSpecial && this.rng.chance(this.diff.specialChance)) {
       this.spawnFood(this.rng.weighted(SPECIAL_TYPES, (t) => FOODS[t].weight));
     }
@@ -479,7 +482,8 @@ export class Game {
   }
 
   private ensureApple(): void {
-    if (!this.foods.some((f) => f.type === 'apple')) this.spawnFood('apple');
+    // One everyday food is always on the board; its kind is picked at random.
+    if (!this.foods.some((f) => isBasic(f.type))) this.spawnFood(this.rng.weighted(BASIC_TYPES, (t) => FOODS[t].basicWeight ?? 0));
   }
 
   spawnFood(type: FoodType): FoodItem | null {
@@ -521,9 +525,17 @@ export class Game {
   /** Magnet: food near the head drifts one cell toward it each step. */
   private pullFood(): void {
     const head = this.head;
-    for (const f of this.foods) {
+    const reached: FoodItem[] = [];
+    for (const f of [...this.foods]) {
       if (f.type === 'poison') continue;
-      if (chebyshev(f.pos, head) > MAGNET_RADIUS) continue;
+      const d = chebyshev(f.pos, head);
+      if (d > MAGNET_RADIUS) continue;
+      if (d <= 1) {
+        // Right next to the mouth (even diagonally): snapped in and eaten, no turn needed.
+        f.pos = { ...head };
+        reached.push(f);
+        continue;
+      }
       const dx = Math.sign(head.x - f.pos.x);
       const dy = Math.sign(head.y - f.pos.y);
       const options: Vec[] =
@@ -534,12 +546,18 @@ export class Game {
         if (o.x === 0 && o.y === 0) continue;
         const tx = f.pos.x + o.x;
         const ty = f.pos.y + o.y;
-        if (tx === head.x && ty === head.y) break;
+        if (tx === head.x && ty === head.y) {
+          // Pulled right into the mouth: eaten without having to turn.
+          f.pos = { x: tx, y: ty };
+          reached.push(f);
+          break;
+        }
         if (!this.isFree(tx, ty)) continue;
         f.pos = { x: tx, y: ty };
         break;
       }
     }
+    for (const f of reached) if (this.foods.includes(f)) this.eat(f);
   }
 
   // --------------------------------------------------------------- movers

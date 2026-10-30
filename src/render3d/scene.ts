@@ -11,7 +11,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { EFFECT_COLORS } from '../config/food';
+import { EFFECT_COLORS, isBasic, type FoodType } from '../config/food';
 import type { SkinConfig } from '../config/skins';
 import type { ZoneConfig } from '../config/zones';
 import { TIMED_EFFECTS, type Game } from '../core/state';
@@ -48,6 +48,7 @@ interface ZoneLayers {
 }
 
 const FOV = 40;
+const FOOD_EMOJI: Partial<Record<FoodType, string>> = { apple: '🍎', egg: '🥚', ladybug: '🐞', mouse: '🐭' };
 /** Camera elevation above the ground plane (degrees). */
 const TILT = 52;
 
@@ -261,7 +262,7 @@ export class Renderer3D {
       this.old.ambient.update(view.dtMs, this.target.x, this.target.z, 1 - ft);
     }
 
-    this.items.update(game, alpha, view.timeMs, hx, hz, showSnake);
+    this.items.update(game, alpha, view.timeMs, hx, hz, showSnake, cur.zone.light.hemi < 1.2);
     this.movers.update(cur.zone, game.movers, alpha, view.timeMs);
     const pixelScale = this.renderer.getDrawingBufferSize(v2).y / (2 * Math.tan((FOV * Math.PI) / 360));
     this.particles.update(fx.particles, pixelScale);
@@ -269,13 +270,14 @@ export class Renderer3D {
     this.renderer.render(this.scene, this.camera);
 
     // DOM overlay: popups, flash, apple arrow.
-    const apple = view.showArrow ? game.foods.find((f) => f.type === 'apple') : undefined;
+    const apple = view.showArrow ? game.foods.find((f) => isBasic(f.type)) : undefined;
     this.overlay.update(
       fx.popups,
       (x, y, z) => this.project(x, y, z),
       fx.flash,
       apple ? this.project(apple.pos.x, 0.4, apple.pos.y) : null,
       this.rect,
+      apple ? FOOD_EMOJI[apple.type] ?? '🍎' : '🍎',
     );
   }
 

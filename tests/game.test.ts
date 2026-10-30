@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DIFFICULTIES } from '../src/config/difficulty';
-import { FOODS } from '../src/config/food';
+import { BASIC_TYPES, FOODS } from '../src/config/food';
 import { MODES } from '../src/config/modes';
 import { FOODS_PER_ZONE } from '../src/config/zones';
 import { Game, type FoodItem } from '../src/core/state';
@@ -204,5 +204,50 @@ describe('Game basics', () => {
         expect(g.isPortal(f.pos.x, f.pos.y)).toBe(false);
       }
     }
+  });
+
+  it('ghost passes through obstacles without dying', () => {
+    const g = make({ difficulty: DIFFICULTIES.hard });
+    g.begin();
+    const o = g.world.cells()[0];
+    g.setSnake([{ x: o.x, y: o.y + 1 }, { x: o.x, y: o.y + 2 }, { x: o.x, y: o.y + 3 }]);
+    g.dir = 0;
+    g.effects.ghost = 5000;
+    stepOnce(g);
+    expect(g.status).toBe('playing');
+    expect(g.head).toEqual({ x: o.x, y: o.y });
+  });
+
+  it('magnet pulls food straight into the mouth and eats it', () => {
+    const g = make({ mode: MODES.zen });
+    g.begin();
+    g.foods.length = 0;
+    g.effects.magnet = 5000;
+    // Food two cells to the side: the snake keeps going straight.
+    const f = g.spawnFood('egg')!;
+    f.pos = { x: g.head.x + 2, y: g.head.y - 1 };
+    f.prev = { ...f.pos };
+    const before = g.score;
+    for (let i = 0; i < 3 && g.foods.includes(f); i++) stepOnce(g);
+    expect(g.foods.includes(f)).toBe(false);
+    expect(g.score).toBeGreaterThan(before);
+    expect(g.dir).toBe(0);
+  });
+
+  it('everyday food comes in several kinds worth different points', () => {
+    const points = new Set(BASIC_TYPES.map((t) => FOODS[t].points));
+    expect(BASIC_TYPES.length).toBeGreaterThanOrEqual(4);
+    expect(points.size).toBe(BASIC_TYPES.length);
+    const seen = new Set<string>();
+    const g = make({ mode: MODES.zen, seed: 7 });
+    g.begin();
+    for (let i = 0; i < 60; i++) {
+      const basic = g.foods.find((f) => BASIC_TYPES.includes(f.type))!;
+      seen.add(basic.type);
+      basic.pos = { x: g.head.x, y: g.head.y - 1 };
+      basic.prev = { ...basic.pos };
+      stepOnce(g);
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(3);
   });
 });

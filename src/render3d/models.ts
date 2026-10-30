@@ -102,13 +102,63 @@ export function buildFoodModel(type: FoodType): FoodModel {
     case 'apple':
       return {
         geometry: merge([
-          part(new SphereGeometry(0.34, 18, 14), c, { scale: [1, 0.92, 1] }),
-          part(new SphereGeometry(0.1, 8, 6), '#b3141c', { pos: [0, 0.27, 0] }),
-          part(new CylinderGeometry(0.03, 0.035, 0.2, 6), '#6d3b12', { pos: [0, 0.38, 0], rot: [0, 0, 0.25] }),
-          part(new SphereGeometry(0.11, 8, 6), a, { pos: [0.1, 0.42, 0], scale: [1.4, 0.3, 0.7], rot: [0, 0, 0.5] }),
-          part(new SphereGeometry(0.08, 8, 6), '#ffffff', { pos: [-0.16, 0.12, 0.22], scale: [0.6, 1, 0.4] }),
+          // Two overlapping lobes + a dimple at the top read as an apple, not a tomato.
+          part(new SphereGeometry(0.3, 18, 14), c, { pos: [-0.07, 0, 0], scale: [1, 1.05, 1] }),
+          part(new SphereGeometry(0.3, 18, 14), c, { pos: [0.07, 0, 0], scale: [1, 1.05, 1] }),
+          part(new SphereGeometry(0.27, 14, 10), '#ff6b5b', { pos: [0, -0.06, 0.08] }),
+          part(new SphereGeometry(0.09, 8, 6), '#9c1018', { pos: [0, 0.29, 0], scale: [1.4, 0.5, 1.4] }),
+          part(new CylinderGeometry(0.025, 0.035, 0.24, 6), '#6d3b12', { pos: [0.02, 0.4, 0], rot: [0, 0, -0.2] }),
+          part(new SphereGeometry(0.13, 8, 6), a, { pos: [0.15, 0.42, 0], scale: [1.5, 0.3, 0.75], rot: [0, 0, 0.45] }),
+          part(new SphereGeometry(0.08, 8, 6), '#ffffff', { pos: [-0.17, 0.12, 0.2], scale: [0.6, 1, 0.4] }),
         ]),
-        metalness: 0.05, roughness: 0.3, emissive: 0.05, opacity: 1,
+        metalness: 0.05, roughness: 0.3, emissive: 0.12, opacity: 1,
+      };
+    case 'egg':
+      return {
+        geometry: merge([
+          part(new SphereGeometry(0.24, 16, 12), c, { pos: [0, 0.05, 0], scale: [1, 1.35, 1] }),
+          ...[[0.1, 0.15, 0.18], [-0.12, 0.05, 0.17], [0.05, -0.1, 0.22], [-0.04, 0.25, 0.15], [0.17, -0.05, 0.12]].map(([x, y, z]) =>
+            part(new SphereGeometry(0.03, 5, 4), a, { pos: [x, y, z], scale: [1, 1, 0.4] }),
+          ),
+          // Little straw nest.
+          part(new TorusGeometry(0.24, 0.07, 6, 16), '#c9a26b', { pos: [0, -0.24, 0], rot: [Math.PI / 2, 0, 0] }),
+          part(new TorusGeometry(0.2, 0.05, 6, 16), '#b08a5a', { pos: [0, -0.2, 0], rot: [Math.PI / 2, 0, 0.5] }),
+        ]),
+        metalness: 0.05, roughness: 0.4, emissive: 0.15, opacity: 1,
+      };
+    case 'ladybug': {
+      const spots = [[0.1, 0.12, 0.12], [-0.12, 0.13, 0.08], [0.15, 0.08, -0.08], [-0.1, 0.1, -0.13], [0.0, 0.17, -0.02]];
+      return {
+        geometry: merge([
+          part(new SphereGeometry(0.27, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), c, { pos: [0, -0.06, -0.03], scale: [1, 0.85, 1.15] }),
+          part(new BoxGeometry(0.015, 0.2, 0.55), a, { pos: [0, 0.07, -0.04] }),
+          ...spots.map(([x, y, z]) => part(new SphereGeometry(0.05, 6, 4), a, { pos: [x, y, z], scale: [1, 0.5, 1] })),
+          part(new SphereGeometry(0.12, 10, 8), a, { pos: [0, -0.04, 0.27] }),
+          part(new SphereGeometry(0.03, 5, 4), '#ffffff', { pos: [-0.05, 0.0, 0.37] }),
+          part(new SphereGeometry(0.03, 5, 4), '#ffffff', { pos: [0.05, 0.0, 0.37] }),
+          part(new CylinderGeometry(0.01, 0.01, 0.16, 4), a, { pos: [-0.05, 0.09, 0.36], rot: [0.7, 0, 0.3] }),
+          part(new CylinderGeometry(0.01, 0.01, 0.16, 4), a, { pos: [0.05, 0.09, 0.36], rot: [0.7, 0, -0.3] }),
+          ...[-1, 1].flatMap((sd) => [-0.12, 0, 0.12].map((z) => part(new CylinderGeometry(0.012, 0.012, 0.16, 4), a, { pos: [sd * 0.25, -0.1, z], rot: [0, 0, sd * 1.1] }))),
+        ]),
+        metalness: 0.2, roughness: 0.2, emissive: 0.12, opacity: 1,
+      };
+    }
+    case 'mouse':
+      return {
+        geometry: merge([
+          part(new SphereGeometry(0.22, 14, 10), c, { pos: [0, -0.05, -0.02], scale: [0.9, 0.75, 1.3] }),
+          part(new SphereGeometry(0.14, 12, 9), c, { pos: [0, 0.0, 0.26], scale: [0.9, 0.85, 1.1] }),
+          part(new ConeGeometry(0.06, 0.12, 8), c, { pos: [0, -0.02, 0.4], rot: [Math.PI / 2, 0, 0] }),
+          part(new SphereGeometry(0.03, 6, 4), a, { pos: [0, -0.02, 0.46] }),
+          part(new SphereGeometry(0.1, 10, 6), a, { pos: [-0.11, 0.14, 0.2], scale: [1, 1, 0.3] }),
+          part(new SphereGeometry(0.1, 10, 6), a, { pos: [0.11, 0.14, 0.2], scale: [1, 1, 0.3] }),
+          part(new SphereGeometry(0.11, 10, 6), c, { pos: [-0.11, 0.14, 0.19], scale: [1.15, 1.15, 0.25] }),
+          part(new SphereGeometry(0.11, 10, 6), c, { pos: [0.11, 0.14, 0.19], scale: [1.15, 1.15, 0.25] }),
+          part(new SphereGeometry(0.025, 5, 4), '#111111', { pos: [-0.06, 0.04, 0.35] }),
+          part(new SphereGeometry(0.025, 5, 4), '#111111', { pos: [0.06, 0.04, 0.35] }),
+          part(new TorusGeometry(0.16, 0.015, 4, 12, Math.PI * 1.2), a, { pos: [0.1, -0.12, -0.3], rot: [Math.PI / 2, 0, 0] }),
+        ]),
+        metalness: 0.05, roughness: 0.55, emissive: 0.1, opacity: 1,
       };
     case 'golden':
       return {

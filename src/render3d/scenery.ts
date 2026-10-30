@@ -4,11 +4,9 @@
 //   snake, food, a hazard or a portal is next to it or would be hidden
 //   behind it, then pops back up;
 // - animated creatures (butterflies, fish, birds, tumbleweeds, drones, UFOs);
-// - drifting cloud shadows, underwater light rays, and giant planets far
+// - drifting cloud shadows and giant planets far
 //   below the see-through space ground (real parallax depth).
 import {
-  AdditiveBlending,
-  CanvasTexture,
   DynamicDrawUsage,
   Group,
   InstancedMesh,
@@ -115,7 +113,6 @@ export class SceneryLayer {
 
   private clouds: InstancedMesh | null = null;
   private cloudPos: { x: number; z: number; s: number }[] = [];
-  private rays: Mesh[] = [];
   private planets: { mesh: Mesh; x: number; z: number }[] = [];
   private t = 0;
 
@@ -188,21 +185,6 @@ export class SceneryLayer {
       this.clouds.renderOrder = -5;
       this.group.add(this.clouds);
       for (let i = 0; i < 7; i++) this.cloudPos.push({ x: this.rng.range(-25, 25), z: this.rng.range(-25, 25), s: this.rng.range(7, 13) });
-    }
-
-    // Underwater light rays.
-    if (sc.lightRays) {
-      const tex = rayTexture();
-      const mat = track(this.mats, new MeshBasicMaterial({ map: tex, blending: AdditiveBlending, depthWrite: false, color: '#9fe8ff', side: 2 }), 0.4, true);
-      for (let i = 0; i < 8; i++) {
-        const m = new Mesh(new PlaneGeometry(this.rng.range(1.2, 2.6), 9), mat);
-        m.rotation.set(-0.35, this.rng.range(-0.4, 0.4), this.rng.range(-0.25, 0.25));
-        m.userData.ox = this.rng.range(-14, 14);
-        m.userData.oz = this.rng.range(-14, 10);
-        m.userData.ph = this.rng.next() * 6;
-        this.rays.push(m);
-        this.group.add(m);
-      }
     }
 
     // Giant planets below the space ground.
@@ -411,11 +393,6 @@ export class SceneryLayer {
       this.clouds.instanceMatrix.needsUpdate = true;
     }
 
-    // ---- light rays sway with the camera
-    for (const r of this.rays) {
-      r.position.set(camX + r.userData.ox + Math.sin(this.t * 0.3 + r.userData.ph) * 1.5, 3.5, camZ + r.userData.oz);
-    }
-
     // ---- planets: anchored in the world, wrapped around the camera
     for (const p of this.planets) {
       if (p.x - camX > 70) p.x -= 140;
@@ -440,27 +417,4 @@ export class SceneryLayer {
     });
     for (const m of this.mats) m.dispose();
   }
-}
-
-let rayTex: CanvasTexture | null = null;
-function rayTexture(): CanvasTexture {
-  if (rayTex) return rayTex;
-  const c = document.createElement('canvas');
-  c.width = 32;
-  c.height = 128;
-  const ctx = c.getContext('2d')!;
-  const g = ctx.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, 'rgba(255,255,255,0.9)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 32, 128);
-  const side = ctx.createLinearGradient(0, 0, 32, 0);
-  side.addColorStop(0, 'rgba(0,0,0,1)');
-  side.addColorStop(0.5, 'rgba(0,0,0,0)');
-  side.addColorStop(1, 'rgba(0,0,0,1)');
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = side;
-  ctx.fillRect(0, 0, 32, 128);
-  rayTex = new CanvasTexture(c);
-  return rayTex;
 }

@@ -21,9 +21,11 @@ export function renderGroundTile(zone: ZoneConfig, cells: number, cellPx: number
 
   ctx.fillStyle = p.boardA;
   ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = p.boardB;
-  for (let y = 0; y < rows; y++) {
-    for (let x = y % 2; x < cols; x += 2) ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+  if (zone.checker) {
+    ctx.fillStyle = p.boardB;
+    for (let y = 0; y < rows; y++) {
+      for (let x = y % 2; x < cols; x += 2) ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+    }
   }
 
   const c = cellPx;
@@ -32,6 +34,22 @@ export function renderGroundTile(zone: ZoneConfig, cells: number, cellPx: number
     const rng = new Rng(zone.id.length * 7919 + cells * 31);
     ctx.save();
     ctx.translate(ox, oy);
+    if (!zone.checker) {
+      // Natural ground: soft patches of lighter and darker shades instead of squares.
+      const patches = new Rng(zone.id.length * 104729 + cells);
+      for (let i = 0; i < cols * rows * 0.5; i++) {
+        const x = patches.next() * w;
+        const y = patches.next() * h;
+        const r = cellPx * patches.range(0.6, 2.4);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        const col = patches.chance(0.5) ? p.boardB : patches.chance(0.5) ? p.pattern : '#ffffff';
+        const a = col === '#ffffff' ? 0.07 : patches.range(0.25, 0.55);
+        g.addColorStop(0, hexA(col, a));
+        g.addColorStop(1, hexA(col, 0));
+        ctx.fillStyle = g;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+    }
     switch (zone.pattern) {
       case 'grass': {
         ctx.strokeStyle = p.pattern;
@@ -174,4 +192,9 @@ export function renderGroundTile(zone: ZoneConfig, cells: number, cellPx: number
     ctx.restore();
   }
   return canvas;
+}
+
+function hexA(hex: string, a: number): string {
+  const v = parseInt(hex.slice(1), 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
 }

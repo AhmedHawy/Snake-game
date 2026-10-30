@@ -31,14 +31,46 @@ export interface ZoneLight {
   sun: number;
 }
 
+/** Small ground decorations (low, never in the way). */
 export type DecorKind =
-  | 'flower' | 'mushroom' | 'grass'
-  | 'pebble' | 'dune' | 'skull'
-  | 'shell' | 'starfish' | 'seaweed'
-  | 'snowMound' | 'crystal' | 'pine'
-  | 'ember' | 'darkRock'
-  | 'neonTile' | 'neonPyramid'
-  | 'crater' | 'spaceCrystal';
+  | 'flower' | 'tulip' | 'mushroom' | 'grass' | 'clover'
+  | 'pebble' | 'dune' | 'skull' | 'succulent'
+  | 'shell' | 'starfish' | 'seaweed' | 'urchin'
+  | 'snowMound' | 'crystal' | 'pine' | 'icePuddle'
+  | 'ember' | 'darkRock' | 'lavaPool'
+  | 'neonTile' | 'neonPyramid' | 'neonRing'
+  | 'crater' | 'spaceCrystal' | 'meteorite';
+
+/**
+ * Big scenery (trees, palms, kelp, snowmen, towers...). Not obstacles: they
+ * shrink out of the way whenever the snake, food or a hazard gets near or
+ * would be hidden behind them.
+ */
+export type TallKind =
+  | 'tree' | 'blossomTree' | 'bush' | 'sunflower'
+  | 'saguaro' | 'palm' | 'rockPillar'
+  | 'kelp' | 'coralFan' | 'brainCoral' | 'chest'
+  | 'snowPine' | 'snowman' | 'iceSpike'
+  | 'obsidian' | 'miniVolcano' | 'deadTree'
+  | 'neonTower' | 'neonPalm' | 'neonArch'
+  | 'crystalSpire' | 'satellite' | 'alienPlant';
+
+/** Animated creatures roaming around the camera. */
+export type CreatureKind = 'butterfly' | 'tumbleweed' | 'vulture' | 'fish' | 'jellyfish' | 'bird' | 'bat' | 'drone' | 'ufo';
+
+export interface SceneryConfig {
+  tall: TallKind[];
+  /** Big scenery pieces per 16x16 chunk. */
+  tallPerChunk: number;
+  creatures: CreatureKind[];
+  creatureCount: number;
+  /** Soft cloud shadows drifting over the ground. */
+  cloudShadows: boolean;
+  /** Sun rays through the water. */
+  lightRays?: boolean;
+  /** Huge planets and moons far below a see-through ground (parallax depth). */
+  planets?: boolean;
+}
 
 export interface ZoneConfig {
   id: string;
@@ -53,10 +85,15 @@ export interface ZoneConfig {
   /** Obstacle piece shapes as cell offsets (randomly rotated when placed). */
   obstacleShapes: Vec[][];
   light: ZoneLight;
+  /** Checkerboard on the ground (off = natural ground with soft color patches). */
+  checker: boolean;
+  /** Ground opacity (below 1 lets the far layer show through, e.g. space). */
+  groundOpacity?: number;
   /** Small non-blocking 3D ground decorations. */
   decor: DecorKind[];
   /** Decorations per 16x16 chunk. */
   decorPerChunk: number;
+  scenery: SceneryConfig;
 }
 
 /** Foods (apples + golden apples) needed to advance to the next zone. */
@@ -81,7 +118,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'grass', ambient: 'leaves', ambientCount: 18,
     obstacleStyle: 'rock', obstacleShapes: [SINGLE, PAIR, SQUARE],
     light: { sky: '#eaffd8', ground: '#3d6b2a', hemi: 1.6, sun: 2.2 },
-    decor: ['flower', 'mushroom', 'grass'], decorPerChunk: 26,
+    decor: ['flower', 'tulip', 'mushroom', 'grass', 'clover'], decorPerChunk: 55,
+    checker: false,
+    scenery: { tall: ['tree', 'blossomTree', 'bush', 'sunflower'], tallPerChunk: 9, creatures: ['butterfly'], creatureCount: 10, cloudShadows: true },
   },
   {
     id: 'desert',
@@ -94,7 +133,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'dunes', ambient: 'sand', ambientCount: 45,
     obstacleStyle: 'cactus', obstacleShapes: [SINGLE, PAIR, ELL],
     light: { sky: '#fff1d0', ground: '#8a5a2b', hemi: 1.6, sun: 2.4 },
-    decor: ['pebble', 'dune', 'skull'], decorPerChunk: 18,
+    decor: ['pebble', 'dune', 'skull', 'succulent'], decorPerChunk: 40,
+    checker: false,
+    scenery: { tall: ['saguaro', 'palm', 'rockPillar'], tallPerChunk: 7, creatures: ['tumbleweed', 'vulture'], creatureCount: 7, cloudShadows: true },
   },
   {
     id: 'ocean',
@@ -107,7 +148,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'waves', ambient: 'bubbles', ambientCount: 26,
     obstacleStyle: 'coral', obstacleShapes: [SINGLE, ELL, TEE],
     light: { sky: '#9fe8ff', ground: '#06324a', hemi: 1.4, sun: 1.6 },
-    decor: ['shell', 'starfish', 'seaweed'], decorPerChunk: 22,
+    decor: ['shell', 'starfish', 'seaweed', 'urchin'], decorPerChunk: 50,
+    checker: false,
+    scenery: { tall: ['kelp', 'coralFan', 'brainCoral', 'chest'], tallPerChunk: 11, creatures: ['fish', 'jellyfish'], creatureCount: 14, cloudShadows: false, lightRays: true },
   },
   {
     id: 'snow',
@@ -120,7 +163,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'frost', ambient: 'snow', ambientCount: 55,
     obstacleStyle: 'ice', obstacleShapes: [SINGLE, PAIR, SQUARE, LINE3],
     light: { sky: '#ffffff', ground: '#7fa8c8', hemi: 1.5, sun: 1.8 },
-    decor: ['snowMound', 'crystal', 'pine'], decorPerChunk: 20,
+    decor: ['snowMound', 'crystal', 'pine', 'icePuddle'], decorPerChunk: 42,
+    checker: false,
+    scenery: { tall: ['snowPine', 'snowman', 'iceSpike'], tallPerChunk: 8, creatures: ['bird'], creatureCount: 8, cloudShadows: true },
   },
   {
     id: 'volcano',
@@ -133,7 +178,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'cracks', ambient: 'embers', ambientCount: 40,
     obstacleStyle: 'lava', obstacleShapes: [SINGLE, PAIR, ELL, SQUARE],
     light: { sky: '#ffb38a', ground: '#2a0804', hemi: 0.9, sun: 1.2 },
-    decor: ['ember', 'darkRock'], decorPerChunk: 22,
+    decor: ['ember', 'darkRock', 'meteorite'], decorPerChunk: 40,
+    checker: false,
+    scenery: { tall: ['obsidian', 'miniVolcano', 'deadTree'], tallPerChunk: 7, creatures: ['bat'], creatureCount: 8, cloudShadows: false },
   },
   {
     id: 'neon',
@@ -146,7 +193,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'grid', ambient: 'neon', ambientCount: 14,
     obstacleStyle: 'neon', obstacleShapes: [PAIR, LINE3, ELL],
     light: { sky: '#a58cff', ground: '#05010f', hemi: 0.8, sun: 0.7 },
-    decor: ['neonTile', 'neonPyramid'], decorPerChunk: 18,
+    decor: ['neonTile', 'neonPyramid', 'neonRing'], decorPerChunk: 34,
+    checker: true,
+    scenery: { tall: ['neonTower', 'neonPalm', 'neonArch'], tallPerChunk: 7, creatures: ['drone'], creatureCount: 9, cloudShadows: false },
   },
   {
     id: 'space',
@@ -159,6 +208,9 @@ export const ZONES: ZoneConfig[] = [
     pattern: 'starfield', ambient: 'stars', ambientCount: 60,
     obstacleStyle: 'asteroid', obstacleShapes: [SINGLE, SINGLE, SQUARE],
     light: { sky: '#c9d3ff', ground: '#000004', hemi: 0.9, sun: 1.3 },
-    decor: ['crater', 'spaceCrystal'], decorPerChunk: 16,
+    decor: ['crater', 'spaceCrystal', 'meteorite'], decorPerChunk: 34,
+    checker: false,
+    groundOpacity: 0.62,
+    scenery: { tall: ['crystalSpire', 'satellite', 'alienPlant'], tallPerChunk: 6, creatures: ['ufo'], creatureCount: 4, cloudShadows: false, planets: true },
   },
 ];

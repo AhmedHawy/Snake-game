@@ -150,7 +150,16 @@ export class App implements UiHost {
     this.screens.hide();
   }
 
+  /** Ends the current run on purpose (e.g. Zen mode never ends by itself): records the score and shows the summary. */
+  endRun(): void {
+    if (!this.inGame || this.overShown) return;
+    this.paused = false;
+    this.onGameOver('ended');
+  }
+
   toMenu(): void {
+    // Leaving a run from the pause menu still records its score.
+    if (this.inGame && !this.overShown && this.game.score > 0) submitScore(this.settings.mode, this.settings.difficulty, this.game.score);
     this.inGame = false;
     this.paused = false;
     this.hud.show(false);
@@ -342,7 +351,7 @@ export class App implements UiHost {
       this.dyingMs += dt;
       if (this.dyingMs > DEATH_SEQUENCE_MS) {
         g.finishDying();
-        this.onGameOver(false);
+        this.onGameOver('crash');
       }
     }
   }
@@ -410,7 +419,7 @@ export class App implements UiHost {
         }
         case 'timeUp':
           this.sfx.timeUp();
-          this.onGameOver(true);
+          this.onGameOver('timeUp');
           break;
         default:
           break;
@@ -427,7 +436,7 @@ export class App implements UiHost {
     this.setThemeColor(g.zone.palette.backdrop);
   }
 
-  private onGameOver(timeUp: boolean): void {
+  private onGameOver(reason: 'crash' | 'timeUp' | 'ended'): void {
     if (this.overShown || !this.inGame) return;
     this.overShown = true;
     const g = this.game;
@@ -442,7 +451,7 @@ export class App implements UiHost {
       longestCombo: g.longestCombo,
       zoneKey: g.zone.nameKey as I18nKey,
       loop: g.loop,
-      timeUp,
+      reason,
     });
   }
 

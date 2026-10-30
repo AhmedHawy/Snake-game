@@ -38,7 +38,7 @@ interface PartOpts {
 }
 
 /** Bakes a transform + flat vertex color into a non-indexed geometry part. */
-function part(geo: BufferGeometry, color: string, o: PartOpts = {}): BufferGeometry {
+export function part(geo: BufferGeometry, color: string, o: PartOpts = {}): BufferGeometry {
   const g = geo.index ? geo.toNonIndexed() : geo;
   g.deleteAttribute('uv');
   const [rx, ry, rz] = o.rot ?? [0, 0, 0];
@@ -57,19 +57,19 @@ function part(geo: BufferGeometry, color: string, o: PartOpts = {}): BufferGeome
   return g;
 }
 
-function merge(parts: BufferGeometry[]): BufferGeometry {
+export function merge(parts: BufferGeometry[]): BufferGeometry {
   const g = mergeGeometries(parts, false)!;
   g.computeBoundingSphere();
   return g;
 }
 
-function extrude(shape: Shape, depth: number): BufferGeometry {
+export function extrude(shape: Shape, depth: number): BufferGeometry {
   const g = new ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1, curveSegments: 6 });
   g.center();
   return g;
 }
 
-function starShape(points: number, outer: number, inner: number): Shape {
+export function starShape(points: number, outer: number, inner: number): Shape {
   const s = new Shape();
   for (let i = 0; i < points * 2; i++) {
     const r = i % 2 === 0 ? outer : inner;
@@ -213,13 +213,34 @@ export interface ObstacleModel {
   glow?: BufferGeometry;
 }
 
-/** Variants of the obstacle model for a zone style (instances pick one by seed). */
+/**
+ * Variants of the obstacle model for a zone style (instances pick one by seed).
+ * Every obstacle stands on a red "danger" plate so it can never be mistaken for
+ * harmless scenery.
+ */
 export function buildObstacleModels(style: ObstacleStyle, p: ZonePalette): ObstacleModel[] {
+  return obstacleVariants(style, p).map((v) => ({
+    ...v,
+    body: merge([
+      part(new CylinderGeometry(0.62, 0.66, 0.04, 4), '#8e1b2b', { pos: [0, 0.02, 0], rot: [0, Math.PI / 4, 0] }),
+      part(new CylinderGeometry(0.56, 0.56, 0.05, 4), '#e8475b', { pos: [0, 0.03, 0], rot: [0, Math.PI / 4, 0] }),
+      v.body,
+    ]),
+  }));
+}
+
+function obstacleVariants(style: ObstacleStyle, p: ZonePalette): ObstacleModel[] {
   switch (style) {
     case 'rock':
       return [
         { body: merge([part(new DodecahedronGeometry(0.46, 0), p.obstacle, { pos: [0, 0.3, 0], scale: [1, 0.72, 1] }), part(new DodecahedronGeometry(0.2, 0), p.obstacleLight, { pos: [0.22, 0.12, 0.2] })]) },
-        { body: merge([part(new SphereGeometry(0.4, 8, 6), '#3f8f3a', { pos: [0, 0.32, 0], scale: [1, 0.85, 1] }), part(new SphereGeometry(0.26, 7, 5), '#56b04a', { pos: [0.2, 0.52, 0.1] }), part(new SphereGeometry(0.05, 6, 4), '#ff3b6b', { pos: [0.1, 0.62, 0.3] })]) },
+        {
+          body: merge([
+            part(new DodecahedronGeometry(0.3, 0), p.obstacleDark, { pos: [-0.12, 0.24, 0.05] }),
+            part(new DodecahedronGeometry(0.26, 0), p.obstacle, { pos: [0.2, 0.2, -0.08] }),
+            part(new DodecahedronGeometry(0.2, 0), p.obstacleLight, { pos: [0.02, 0.5, 0] }),
+          ]),
+        },
       ];
     case 'cactus': {
       const body = (armSide: number) =>
@@ -382,5 +403,68 @@ export function buildDecorModel(kind: DecorKind): DecorModel {
       return { geometry: merge([part(new TorusGeometry(0.2, 0.04, 6, 16), '#4a4d6e', { pos: [0, 0.01, 0], rot: [Math.PI / 2, 0, 0] }), part(new CylinderGeometry(0.19, 0.19, 0.01, 14), '#15162e', { pos: [0, 0.004, 0] })]) };
     case 'spaceCrystal':
       return { geometry: merge([part(new OctahedronGeometry(0.08, 0), '#b388ff', { pos: [0, 0.1, 0], scale: [0.7, 1.6, 0.7] }), part(new OctahedronGeometry(0.05, 0), '#5ee6ff', { pos: [0.07, 0.06, 0], scale: [0.7, 1.5, 0.7] })]), glow: true };
+    case 'tulip': {
+      const col = ['#ff5fa2', '#ffd23f', '#b388ff'];
+      return {
+        geometry: merge([
+          part(new CylinderGeometry(0.018, 0.018, 0.3, 4), '#2e7d32', { pos: [0, 0.15, 0] }),
+          part(new SphereGeometry(0.06, 6, 4), '#43a047', { pos: [0.05, 0.08, 0], scale: [0.5, 1.6, 0.3], rot: [0, 0, -0.5] }),
+          part(new ConeGeometry(0.07, 0.12, 6, 1, true), col[0], { pos: [0, 0.34, 0], rot: [Math.PI, 0, 0] }),
+          part(new CylinderGeometry(0.018, 0.018, 0.24, 4), '#2e7d32', { pos: [0.14, 0.12, 0.08] }),
+          part(new ConeGeometry(0.06, 0.1, 6, 1, true), col[1], { pos: [0.14, 0.27, 0.08], rot: [Math.PI, 0, 0] }),
+          part(new CylinderGeometry(0.018, 0.018, 0.26, 4), '#2e7d32', { pos: [-0.12, 0.13, -0.06] }),
+          part(new ConeGeometry(0.06, 0.1, 6, 1, true), col[2], { pos: [-0.12, 0.29, -0.06], rot: [Math.PI, 0, 0] }),
+        ]),
+      };
+    }
+    case 'clover':
+      return {
+        geometry: merge(
+          [0, 1, 2, 3, 4, 5].map((k) =>
+            part(new SphereGeometry(0.07, 6, 4), k % 2 ? '#4caf50' : '#66bb6a', {
+              pos: [Math.cos(k * 1.05) * 0.12, 0.03, Math.sin(k * 1.05) * 0.12],
+              scale: [1, 0.25, 1],
+            }),
+          ),
+        ),
+      };
+    case 'succulent':
+      return {
+        geometry: merge(
+          [0, 1, 2, 3, 4, 5, 6].map((k) =>
+            part(new ConeGeometry(0.05, 0.22, 5), k % 2 ? '#7cb342' : '#9ccc65', {
+              pos: [Math.cos(k * 0.9) * 0.05, 0.08, Math.sin(k * 0.9) * 0.05],
+              rot: [Math.sin(k * 0.9) * 0.6, 0, -Math.cos(k * 0.9) * 0.6],
+            }),
+          ).concat([part(new CylinderGeometry(0.12, 0.1, 0.08, 8), '#c97b4a', { pos: [0, 0.03, 0] })]),
+        ),
+      };
+    case 'urchin': {
+      const spikes: BufferGeometry[] = [];
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2;
+        spikes.push(part(new ConeGeometry(0.02, 0.16, 4), '#3b1f5c', { pos: [Math.cos(a) * 0.09, 0.08, Math.sin(a) * 0.09], rot: [Math.sin(a) * 1.1, 0, -Math.cos(a) * 1.1] }));
+      }
+      return { geometry: merge([part(new SphereGeometry(0.09, 8, 5), '#4a2a70', { pos: [0, 0.05, 0] }), ...spikes]) };
+    }
+    case 'icePuddle':
+      return { geometry: merge([part(new CylinderGeometry(0.32, 0.32, 0.015, 14), '#bfe8ff', { pos: [0, 0.008, 0], scale: [1.3, 1, 0.8] })]) };
+    case 'lavaPool':
+      return {
+        geometry: merge([
+          part(new CylinderGeometry(0.34, 0.34, 0.015, 14), '#ff6a00', { pos: [0, 0.008, 0], scale: [1.3, 1, 0.9] }),
+          part(new CylinderGeometry(0.2, 0.2, 0.02, 12), '#ffd000', { pos: [0.05, 0.01, 0] }),
+        ]),
+        glow: true,
+      };
+    case 'neonRing':
+      return { geometry: merge([part(new TorusGeometry(0.22, 0.025, 6, 24), '#fff200', { pos: [0, 0.02, 0], rot: [Math.PI / 2, 0, 0] })]), glow: true };
+    case 'meteorite':
+      return {
+        geometry: merge([
+          part(new DodecahedronGeometry(0.14, 0), '#6d6a7a', { pos: [0, 0.08, 0] }),
+          part(new DodecahedronGeometry(0.07, 0), '#8f8aa3', { pos: [0.15, 0.04, 0.05] }),
+        ]),
+      };
   }
 }

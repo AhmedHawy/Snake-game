@@ -184,6 +184,10 @@ export class Movers3D {
 
 // ----------------------------------------------------------------- decor
 
+/** Decor farther than this from the camera target (cells) is not placed. */
+const DECOR_REACH_X = 26;
+const DECOR_REACH_Z = 30;
+
 export class DecorLayer {
   readonly group = new Group();
   private readonly meshes: InstancedMesh[] = [];
@@ -221,7 +225,9 @@ export class DecorLayer {
           const px = gx * CHUNK + rng.int(CHUNK) + 0.5;
           const pz = gz * CHUNK + rng.int(CHUNK) + 0.5;
           const rot = rng.next() * Math.PI * 2;
-          const s = 0.8 + rng.next() * 0.6;
+          const s = 1.1 + rng.next() * 0.9;
+          // Only what the tilted camera can actually see (the set is rebuilt every chunk).
+          if (Math.abs(px - x) > DECOR_REACH_X || Math.abs(pz - z) > DECOR_REACH_Z) continue;
           if (blocked(Math.floor(px), Math.floor(pz)) || blocked(Math.ceil(px), Math.ceil(pz))) continue;
           const mesh = this.meshes[kindIdx];
           const k = counts[kindIdx]++;
@@ -251,14 +257,14 @@ export class DecorLayer {
 
 // ---------------------------------------------------------------- ground
 
-const TILE_CELLS = 8;
+const TILE_CELLS = 16;
 const GROUND_SIZE = 128;
 const tileCache = new Map<string, CanvasTexture>();
 
 function groundTexture(zone: ZoneConfig): CanvasTexture {
   let t = tileCache.get(zone.id);
   if (!t) {
-    t = new CanvasTexture(renderGroundTile(zone, TILE_CELLS, 48));
+    t = new CanvasTexture(renderGroundTile(zone, TILE_CELLS, 32));
     t.wrapS = t.wrapT = RepeatWrapping;
     t.repeat.set(GROUND_SIZE / TILE_CELLS, GROUND_SIZE / TILE_CELLS);
     t.colorSpace = SRGBColorSpace;
@@ -272,7 +278,10 @@ export class Ground {
   readonly mesh: Mesh;
   private readonly mat = new MeshStandardMaterial({ roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
 
+  private readonly maxOpacity: number;
+
   constructor(zone: ZoneConfig, layer: number) {
+    this.maxOpacity = zone.groundOpacity ?? 1;
     const g = new PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
     g.rotateX(-Math.PI / 2);
     this.mat.map = groundTexture(zone);
@@ -289,6 +298,7 @@ export class Ground {
   }
 
   setOpacity(a: number): void {
+    a *= this.maxOpacity;
     setOpacity(this.mat, a);
     this.mat.depthWrite = a >= 0.999;
     this.mesh.visible = a > 0.01;

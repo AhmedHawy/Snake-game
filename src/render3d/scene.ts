@@ -20,6 +20,7 @@ import { Items3D } from './items';
 import { Overlay, type ScreenPoint } from './overlay';
 import { Particles3D } from './particles';
 import { Snake3D } from './snake';
+import { SceneryLayer } from './scenery';
 import { Ambient3D, DecorLayer, Ground, Movers3D, ObstacleLayer } from './world';
 
 export interface RenderView {
@@ -42,6 +43,7 @@ interface ZoneLayers {
   ground: Ground;
   obstacles: ObstacleLayer;
   decor: DecorLayer;
+  scenery: SceneryLayer;
   ambient: Ambient3D;
 }
 
@@ -144,17 +146,19 @@ export class Renderer3D {
       ground: new Ground(zone, this.old ? 1 : 0),
       obstacles: new ObstacleLayer(zone),
       decor: new DecorLayer(zone, index),
+      scenery: new SceneryLayer(zone, index),
       ambient: new Ambient3D(zone),
     };
-    this.scene.add(l.ground.mesh, l.obstacles.group, l.decor.group, l.ambient.points);
+    this.scene.add(l.ground.mesh, l.obstacles.group, l.decor.group, l.scenery.group, l.ambient.points);
     return l;
   }
 
   private disposeLayers(l: ZoneLayers): void {
-    this.scene.remove(l.ground.mesh, l.obstacles.group, l.decor.group, l.ambient.points);
+    this.scene.remove(l.ground.mesh, l.obstacles.group, l.decor.group, l.scenery.group, l.ambient.points);
     l.ground.dispose();
     l.obstacles.dispose();
     l.decor.dispose();
+    l.scenery.dispose();
     l.ambient.dispose();
   }
 
@@ -245,11 +249,15 @@ export class Renderer3D {
     cur.ground.setOpacity(this.old ? ft : 1);
     cur.decor.update(this.target.x, this.target.z, (x, y) => game.isBlocked(x, y));
     cur.decor.setOpacity(this.old ? ft : 1);
+    cur.scenery.update(view.dtMs, this.target.x, this.target.z, game, hx, hz);
+    cur.scenery.setOpacity(this.old ? ft : 1);
     cur.ambient.update(view.dtMs, this.target.x, this.target.z, this.old ? ft : 1);
     if (this.old) {
       this.old.ground.follow(this.target.x, this.target.z);
       this.old.obstacles.setOpacity(1 - ft);
       this.old.decor.setOpacity(1 - ft);
+      this.old.scenery.update(view.dtMs, this.target.x, this.target.z, game, hx, hz);
+      this.old.scenery.setOpacity(1 - ft);
       this.old.ambient.update(view.dtMs, this.target.x, this.target.z, 1 - ft);
     }
 

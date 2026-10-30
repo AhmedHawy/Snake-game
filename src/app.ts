@@ -21,7 +21,8 @@ import { readSafeArea } from './platform/safeArea';
 import { Capacitor } from '@capacitor/core';
 import { Renderer3D } from './render3d/scene';
 import { addPoints, bestScore, loadSettings, saveSettings, submitScore, totalPoints, type Settings } from './storage/storage';
-import { hideZoneBanner, showZoneBanner } from './ui/banner';
+import { hideZoneBanner, showBanner, showZoneBanner } from './ui/banner';
+import type { AbilityId } from './config/abilities';
 import { Hud } from './ui/hud';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
@@ -82,7 +83,7 @@ export class App implements UiHost {
 
     new SwipeInput(this.canvas, {
       deadZone: () => 16,
-      onDir: (d) => this.steer(d, false),
+      onDir: (d, dx, dy) => this.steer(d, false, leanOf(d, dx, dy)),
       onTap: () => {
         if (this.canPlay) this.game.begin();
       },
@@ -219,9 +220,9 @@ export class App implements UiHost {
     return this.inGame && !this.paused && this.screens.current === 'none';
   }
 
-  private steer(d: Dir, fromDpad: boolean): void {
+  private steer(d: Dir, fromDpad: boolean, lean?: Dir): void {
     if (!this.canPlay) return;
-    if (this.game.steer(d) && fromDpad) haptics.tap();
+    if (this.game.steer(d, lean) && fromDpad) haptics.tap();
   }
 
   private pause(): void {
@@ -443,6 +444,29 @@ export class App implements UiHost {
           }
           break;
         }
+        case 'breath':
+          this.fx.onBreath(e.ability, e.from, e.dir, e.cells, e.targets, e.strong);
+          this.sfx.breath(BREATH_SOUND[e.ability]);
+          break;
+        case 'rivalHit': {
+          const rs = SKINS[e.rival.skin];
+          this.fx.onRivalHit(e.removed, [rs.body(0, 2, 0), rs.head], e.points);
+          haptics.tap();
+          break;
+        }
+        case 'smash':
+          this.fx.onSmash(e.cells, g.zone.palette.accent);
+          this.sfx.smash();
+          break;
+        case 'waveCleared':
+          showBanner(t('wave.cleared'), `⚔️ ${t('wave.title', { n: e.wave + 1 })}`, '#7dff6b');
+          this.sfx.golden();
+          haptics.powerUp();
+          break;
+        case 'wave':
+          showBanner('⚔️', t('wave.title', { n: e.wave }), '#ff5c5c');
+          this.sfx.zone();
+          break;
         case 'timeUp':
           this.sfx.timeUp();
           this.onGameOver('timeUp');
@@ -505,3 +529,15 @@ export class App implements UiHost {
     }
   }
 }
+
+/** Which way a backwards swipe leans (picks the U-turn side), if clearly sideways. */
+function leanOf(d: Dir, dx: number, dy: number): Dir | undefined {
+  if (d === 1 || d === 3) return Math.abs(dy) > Math.abs(dx) * 0.3 ? (dy > 0 ? 2 : 0) : undefined;
+  return Math.abs(dx) > Math.abs(dy) * 0.3 ? (dx > 0 ? 1 : 3) : undefined;
+}
+
+const BREATH_SOUND: Record<AbilityId, 'hot' | 'cold' | 'magic' | 'storm'> = {
+  fire: 'hot', lava: 'hot', royal: 'storm', lightning: 'storm', roar: 'storm', shadow: 'storm',
+  water: 'cold', tsunami: 'cold', ice: 'cold', crystal: 'cold',
+  poison: 'magic', prism: 'magic', leaves: 'magic', blackHole: 'magic',
+};

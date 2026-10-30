@@ -33,13 +33,36 @@ describe('Game basics', () => {
     expect(g.status).toBe('playing');
   });
 
-  it('ignores 180° reversal and same-direction input', () => {
+  it('same-direction input sprints for a while', () => {
     const g = make();
     g.begin();
-    expect(g.dir).toBe(0);
-    expect(g.steer(2)).toBe(false); // reverse
-    expect(g.steer(0)).toBe(false); // same
+    const normal = g.stepMs;
+    expect(g.steer(0)).toBe(true);
     expect(g.queue).toEqual([]);
+    expect(g.stepMs).toBeLessThan(normal);
+    g.steer(0);
+    g.steer(0);
+    expect(g.sprintMs).toBeLessThanOrEqual(3000);
+    g.update(3100);
+    expect(g.sprintMs).toBe(0);
+  });
+
+  it('reverse input makes a U-turn into the next lane (lean picks the side)', () => {
+    const g = make();
+    g.begin();
+    const start = { ...g.head };
+    expect(g.steer(2, 1)).toBe(true); // reverse, leaning right
+    expect(g.queue).toEqual([1, 2]);
+    stepOnce(g);
+    stepOnce(g);
+    expect(g.head).toEqual({ x: start.x + 1, y: start.y + 1 });
+    expect(g.status).toBe('playing');
+    // Without a lean it picks a side by itself.
+    const h = make();
+    h.begin();
+    expect(h.steer(2)).toBe(true);
+    expect([1, 3]).toContain(h.queue[0]);
+    expect(h.queue[1]).toBe(2);
   });
 
   it('buffers quick double-turns so a U-turn works across two steps', () => {
@@ -54,11 +77,12 @@ describe('Game basics', () => {
     expect(g.head).toEqual({ x: start.x + 1, y: start.y + 1 });
   });
 
-  it('rejects a reversal relative to the last queued turn', () => {
+  it('does not overfill the turn queue with U-turns', () => {
     const g = make();
     g.begin();
     g.steer(1);
-    expect(g.steer(3)).toBe(false);
+    g.steer(2);
+    expect(g.steer(0)).toBe(false); // reverse of the last queued turn, no room left
   });
 
   it('grows after eating an apple and scores points', () => {

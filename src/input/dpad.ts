@@ -4,6 +4,8 @@ import type { Rect } from '../core/grid';
 import type { Dir } from '../core/types';
 import { ICONS, h } from '../ui/dom';
 
+const HOLD_REPEAT_MS = 700;
+
 export class DPad {
   constructor(private readonly root: HTMLElement, onDir: (d: Dir) => void) {
     const dirs: [Dir, string][] = [
@@ -14,6 +16,7 @@ export class DPad {
     ];
     root.replaceChildren(
       ...dirs.map(([d, name]) => {
+        let timer = 0;
         const b = h('button', { class: `dp dp-${name}`, html: ICONS.arrow, attrs: { 'aria-label': name } });
         b.addEventListener(
           'pointerdown',
@@ -22,10 +25,16 @@ export class DPad {
             e.stopPropagation();
             b.classList.add('down');
             onDir(d);
+            // Holding a button keeps sprinting that way.
+            clearInterval(timer);
+            timer = window.setInterval(() => onDir(d), HOLD_REPEAT_MS);
           },
           { passive: false },
         );
-        const up = () => b.classList.remove('down');
+        const up = () => {
+          b.classList.remove('down');
+          clearInterval(timer);
+        };
         b.addEventListener('pointerup', up);
         b.addEventListener('pointercancel', up);
         b.addEventListener('pointerleave', up);

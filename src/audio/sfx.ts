@@ -167,6 +167,32 @@ export class Sfx {
     this.noise(0.2, 3000, 0.06, 0, 500);
   }
 
+  /** Dragon breath: a whoosh, tinted by the ability. */
+  breath(kind: 'hot' | 'cold' | 'magic' | 'storm'): void {
+    if (!this.ready) return;
+    if (kind === 'hot') {
+      this.noise(0.5, 1800, 0.35, 0, 300);
+      this.tone(140, 0.4, { type: 'sawtooth', to: 70, gain: 0.12 });
+    } else if (kind === 'cold') {
+      this.noise(0.45, 7000, 0.18, 0, 2500);
+      [1568, 2093, 2637].forEach((f, i) => this.tone(f, 0.25, { type: 'sine', gain: 0.06, delay: 0.05 + i * 0.05 }));
+    } else if (kind === 'storm') {
+      this.noise(0.6, 2500, 0.45, 0, 150);
+      this.tone(90, 0.6, { type: 'sawtooth', to: 40, gain: 0.25 });
+      this.tone(600, 0.3, { type: 'square', to: 1400, gain: 0.06, delay: 0.05 });
+    } else {
+      this.noise(0.35, 4000, 0.15, 0, 900);
+      this.tone(660, 0.3, { type: 'triangle', to: 1320, gain: 0.12 });
+    }
+  }
+
+  /** Obstacles shattering. */
+  smash(): void {
+    if (!this.ready) return;
+    this.noise(0.3, 3500, 0.35, 0, 200);
+    this.tone(120, 0.2, { type: 'square', to: 60, gain: 0.12 });
+  }
+
   tap(): void {
     if (!this.ready) return;
     this.tone(880, 0.04, { type: 'triangle', to: 660, gain: 0.18 });

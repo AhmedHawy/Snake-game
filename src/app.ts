@@ -5,7 +5,8 @@ import { DIFFICULTIES, type DifficultyId } from './config/difficulty';
 import { isBasic } from './config/food';
 import { setLang, t, type I18nKey } from './config/i18n';
 import { MODES, type ModeId } from './config/modes';
-import { SKINS } from './config/skins';
+import { SKIN_ORDER, SKINS, isUnlocked, type SkinId } from './config/skins';
+import { ZONES } from './config/zones';
 import { computeLayout, isTablet, visibleShortCells, type BoardLayout } from './core/grid';
 import { FixedLoop } from './core/loop';
 import { Game } from './core/state';
@@ -19,7 +20,7 @@ import { bindLifecycle, exitApp } from './platform/lifecycle';
 import { readSafeArea } from './platform/safeArea';
 import { Capacitor } from '@capacitor/core';
 import { Renderer3D } from './render3d/scene';
-import { bestScore, loadSettings, saveSettings, submitScore, type Settings } from './storage/storage';
+import { addPoints, bestScore, loadSettings, saveSettings, submitScore, totalPoints, type Settings } from './storage/storage';
 import { hideZoneBanner, showZoneBanner } from './ui/banner';
 import { Hud } from './ui/hud';
 import { Screens, type UiHost } from './ui/screens';
@@ -53,6 +54,8 @@ export class App implements UiHost {
   private dyingMs = 0;
   private overShown = false;
   private best = 0;
+  /** Points collected over all runs (cached; unlocks skins). */
+  private total = totalPoints();
   private lastBackMs = 0;
   /** Optional FPS meter for checking performance on a real device: add ?fps=1 to the URL. */
   private readonly fpsEl = new URLSearchParams(location.search).has('fps') ? document.createElement('div') : null;
@@ -160,7 +163,10 @@ export class App implements UiHost {
 
   toMenu(): void {
     // Leaving a run from the pause menu still records its score.
-    if (this.inGame && !this.overShown && this.game.score > 0) submitScore(this.settings.mode, this.settings.difficulty, this.game.score);
+    if (this.inGame && !this.overShown && this.game.score > 0) {
+      submitScore(this.settings.mode, this.settings.difficulty, this.game.score);
+      this.total = addPoints(this.game.score);
+    }
     this.inGame = false;
     this.paused = false;
     this.hud.show(false);
@@ -179,6 +185,10 @@ export class App implements UiHost {
   tap(): void {
     this.sfx.tap();
     haptics.tap();
+  }
+
+  totalPoints(): number {
+    return this.total;
   }
 
   bestFor(mode: ModeId, diff: DifficultyId): number {
@@ -261,7 +271,9 @@ export class App implements UiHost {
   }
 
   private get skin() {
-    return SKINS[this.settings.skin] ?? SKINS.classic;
+    const id = this.settings.skin;
+    // A locked skin (e.g. after clearing progress) falls back to the classic look.
+    return SKINS[id] && isUnlocked(id, this.total) ? SKINS[id] : SKINS.classic;
   }
 
   // ------------------------------------------------------------- layout
@@ -319,6 +331,8 @@ export class App implements UiHost {
       mode: MODES[s.mode] ?? MODES.classic,
       difficulty: DIFFICULTIES[s.difficulty] ?? DIFFICULTIES.normal,
       viewRadius: Math.ceil(this.shortCells / 2) + 1,
+      zones: s.world >= 0 && ZONES[s.world] ? [ZONES[s.world]] : undefined,
+      playerSkin: this.skin.id,
     });
     this.best = bestScore(s.mode, s.difficulty);
     this.fx.reset();
@@ -418,6 +432,17 @@ export class App implements UiHost {
           this.dyingMs = 0;
           break;
         }
+        case 'rivalKilled': {
+          const rs = SKINS[e.rival.skin];
+          const now = performance.now();
+          const colors = e.cells.map((_, i) => (i === 0 ? rs.head : rs.body(i, e.cells.length, now)));
+          this.fx.onRivalKilled(e.cells, colors, e.byPlayer ? e.points : 0);
+          if (e.byPlayer) {
+            this.sfx.golden();
+            haptics.powerUp();
+          }
+          break;
+        }
         case 'timeUp':
           this.sfx.timeUp();
           this.onGameOver('timeUp');
@@ -433,7 +458,7 @@ export class App implements UiHost {
     const g = this.game;
     const from = (g.zoneIndex - 1 + g.zones.length) % g.zones.length;
     this.zoneFade = { from, t: 0 };
-    showZoneBanner(g.zone, g.loop);
+    showZoneBanner(g.zone, g.loop, g.zones.length === 1);
     this.setThemeColor(g.zone.palette.backdrop);
   }
 
@@ -443,6 +468,9 @@ export class App implements UiHost {
     const g = this.game;
     const s = this.settings;
     const newBest = submitScore(s.mode, s.difficulty, g.score);
+    const before = this.total;
+    const after = (this.total = addPoints(g.score));
+    const unlocked = SKIN_ORDER.filter((id: SkinId) => !isUnlocked(id, before) && isUnlocked(id, after));
     this.best = bestScore(s.mode, s.difficulty);
     this.screens.show('over', {
       score: g.score,
@@ -453,6 +481,8 @@ export class App implements UiHost {
       zoneKey: g.zone.nameKey as I18nKey,
       loop: g.loop,
       reason,
+      rivalsKilled: g.mode.rivals === 'lethal' ? g.rivalsKilled : undefined,
+      unlocked,
     });
   }
 

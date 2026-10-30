@@ -1,5 +1,7 @@
 // Snake skins. `body` returns the fill color of segment i (0 = head) of n.
-export type SkinId = 'classic' | 'rainbow' | 'tiger' | 'neon' | 'candy' | 'ocean' | 'dragon';
+export type SkinId =
+  | 'classic' | 'rainbow' | 'tiger' | 'neon' | 'candy' | 'ocean'
+  | 'dragon' | 'dragonJade' | 'dragonFrost' | 'dragonGold' | 'dragonShadow';
 
 export interface SkinConfig {
   id: SkinId;
@@ -13,8 +15,25 @@ export interface SkinConfig {
   pupil: string;
   /** Self-glow strength (0..1) for the 3D body. */
   emissive?: number;
-  /** Dragon extras: horns and spines along the back. */
-  dragon?: { horn: string; spine: string };
+  /** Dragon extras (horns, spines, whiskers, scales...). */
+  dragon?: DragonStyle;
+  /** Total points (over all runs) needed to unlock; 0 / undefined = available from the start. */
+  unlockAt?: number;
+}
+
+export interface DragonStyle {
+  horn: string;
+  spine: string;
+  /** Horn length multiplier (1 = default). */
+  hornSize?: number;
+  /** Head size multiplier (1 = default). */
+  headSize?: number;
+  /** Long flowing whiskers from the snout (color), like an eastern dragon. */
+  whiskers?: string;
+  /** Scale plates along both sides of the body (color). */
+  scales?: string;
+  /** Fin-like frills on the sides of the head (default on). */
+  frills?: boolean;
 }
 
 type RGB = [number, number, number];
@@ -52,6 +71,10 @@ const NEON = gradient(['#00f0ff', '#7a5cff', '#ff2bd6']);
 const CANDY = ['#ff6fb5', '#fff0f7', '#7ee8c7', '#fff0f7'];
 const OCEAN = gradient(['#5ee6ff', '#00a6ff', '#0050a8']);
 const DRAGON = gradient(['#ff3b1f', '#c8102e', '#8b0000', '#ff6a00']);
+const JADE = gradient(['#2ee59d', '#16a085', '#0e6655', '#1abc9c']);
+const FROST = gradient(['#f0fbff', '#9fdcff', '#4aa3d8', '#d6f1ff']);
+const GOLD = gradient(['#fff59d', '#ffd23f', '#f39c12', '#ffe082']);
+const SHADOW = gradient(['#5e2a9c', '#2d0a4e', '#120022', '#3d1470']);
 
 export const SKINS: Record<SkinId, SkinConfig> = {
   classic: {
@@ -91,6 +114,34 @@ export const SKINS: Record<SkinId, SkinConfig> = {
     head: '#d7261e', outline: '#3a0505', eyeWhite: '#ffd23f', pupil: '#2a0000',
     dragon: { horn: '#f5deb3', spine: '#ff8c1a' },
   },
+  dragonJade: {
+    id: 'dragonJade', nameKey: 'skin.dragonJade', unlockAt: 1000,
+    // Eastern dragon: green-jade body, golden whiskers and scales, red mane.
+    body: (i, n) => (i % 3 === 1 ? '#0b5345' : pick(JADE, along(i, n))),
+    head: '#27ae60', outline: '#08382c', eyeWhite: '#ffd23f', pupil: '#1a1000',
+    dragon: { horn: '#ffd23f', spine: '#ff5733', hornSize: 0.8, whiskers: '#ffd23f', scales: '#f1c40f', frills: false },
+  },
+  dragonFrost: {
+    id: 'dragonFrost', nameKey: 'skin.dragonFrost', unlockAt: 2500,
+    body: (i, n) => (i % 3 === 1 ? '#bfe9ff' : pick(FROST, along(i, n))),
+    head: '#d6f1ff', outline: '#1c5f8a', eyeWhite: '#5ee6ff', pupil: '#00224a', emissive: 0.15,
+    dragon: { horn: '#ffffff', spine: '#7cc8f5', hornSize: 1.45, scales: '#ffffff' },
+  },
+  dragonGold: {
+    id: 'dragonGold', nameKey: 'skin.dragonGold', unlockAt: 5000,
+    body: (i, n) => (i % 3 === 1 ? '#e67e22' : pick(GOLD, along(i, n))),
+    head: '#ffd23f', outline: '#7a4a00', eyeWhite: '#ffffff', pupil: '#7a0000',
+    dragon: { horn: '#8b4513', spine: '#ff3b3b', hornSize: 1.2, headSize: 1.15, whiskers: '#ff3b3b', scales: '#fff3c4' },
+  },
+  dragonShadow: {
+    id: 'dragonShadow', nameKey: 'skin.dragonShadow', unlockAt: 9000,
+    body: (i, n) => (i % 3 === 1 ? '#7b1fa2' : pick(SHADOW, along(i, n))),
+    head: '#2d0a4e', outline: '#000000', eyeWhite: '#ff1744', pupil: '#2a0000', emissive: 0.2,
+    dragon: { horn: '#b388ff', spine: '#d500f9', hornSize: 1.5, headSize: 1.2, whiskers: '#d500f9', scales: '#6a1b9a' },
+  },
 };
 
-export const SKIN_ORDER: SkinId[] = ['classic', 'dragon', 'rainbow', 'tiger', 'neon', 'candy', 'ocean'];
+export const SKIN_ORDER: SkinId[] = ['classic', 'dragon', 'rainbow', 'tiger', 'neon', 'candy', 'ocean', 'dragonJade', 'dragonFrost', 'dragonGold', 'dragonShadow'];
+
+/** Skins the player can pick with this many total points. */
+export const isUnlocked = (id: SkinId, totalPoints: number): boolean => totalPoints >= (SKINS[id].unlockAt ?? 0);

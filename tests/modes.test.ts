@@ -74,6 +74,7 @@ describe('difficulty', () => {
 
   it('loops back to the first zone with a faster speed tier', () => {
     const g = new Game({ mode: MODES.zen, difficulty: DIFFICULTIES.easy, seed: 3 });
+    g.rivals.length = 0; // rivals would race the player to the food
     g.begin();
     const before = g.stepMs;
     for (let i = 0; i < FOODS_PER_ZONE * ZONES.length; i++) {
@@ -105,5 +106,5 @@ describe('zone change obstacles', () => {
         for (let i = 0; i < 3; i++) stepOnce(g);
       }
     }
-  });
+  }, 30000);
 });

@@ -4,12 +4,13 @@ import type { ZoneConfig } from '../config/zones';
 
 const el = () => document.getElementById('banner')!;
 
-export function showZoneBanner(zone: ZoneConfig, loop: number): void {
+/** `single`: one fixed world is played, so the banner announces a speed-up instead of a new zone. */
+export function showZoneBanner(zone: ZoneConfig, loop: number, single = false): void {
   const b = el();
   b.innerHTML = '';
   const small = document.createElement('div');
   small.className = 'banner-small';
-  small.textContent = t('zone.new');
+  small.textContent = t(single ? 'zone.speedUp' : 'zone.new');
   const big = document.createElement('div');
   big.className = 'banner-big';
   big.textContent = t(zone.nameKey as Parameters<typeof t>[0]);

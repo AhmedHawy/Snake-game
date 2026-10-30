@@ -33,6 +33,17 @@ export function drawSkinPreview(canvas: HTMLCanvasElement, skin: SkinConfig, tim
       ctx.stroke();
     }
   }
+  if (skin.dragon?.scales) {
+    // Scale plates along the body.
+    ctx.fillStyle = skin.dragon.scales;
+    for (let i = 1; i < n; i++) {
+      const [x, y] = pts[i];
+      const rr = r * (1 - 0.35 * (i / n));
+      ctx.beginPath();
+      ctx.ellipse(x, y + rr * 0.35, rr * 0.38, rr * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   if (skin.dragon) {
     // Back spines.
     ctx.fillStyle = skin.dragon.spine;
@@ -47,21 +58,34 @@ export function drawSkinPreview(canvas: HTMLCanvasElement, skin: SkinConfig, tim
     }
   }
   const [hx, hy] = pts[0];
+  const hs = skin.dragon?.headSize ?? 1;
+  if (skin.dragon?.whiskers) {
+    ctx.strokeStyle = skin.dragon.whiskers;
+    ctx.lineWidth = 1.6;
+    for (const s of [-1, 1]) {
+      const sway = Math.sin(timeMs / 260 + s) * r * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(hx + r * 0.9, hy + s * r * 0.3);
+      ctx.quadraticCurveTo(hx + r * 0.6, hy + s * r * 2 + sway, hx - r * 1.2, hy + s * r * 1.7 + sway);
+      ctx.stroke();
+    }
+  }
   ctx.fillStyle = skin.outline;
   ctx.beginPath();
-  ctx.arc(hx, hy, r * 1.15 + 1.5, 0, Math.PI * 2);
+  ctx.arc(hx, hy, r * 1.15 * hs + 1.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = skin.head;
   ctx.beginPath();
-  ctx.arc(hx, hy, r * 1.15, 0, Math.PI * 2);
+  ctx.arc(hx, hy, r * 1.15 * hs, 0, Math.PI * 2);
   ctx.fill();
   if (skin.dragon) {
     // Horns.
     ctx.fillStyle = skin.dragon.horn;
+    const hz = skin.dragon.hornSize ?? 1;
     for (const s of [-1, 1]) {
       ctx.beginPath();
       ctx.moveTo(hx - r * 0.2, hy + s * r * 0.7);
-      ctx.lineTo(hx - r * 1.5, hy + s * r * 1.45);
+      ctx.lineTo(hx - r * (0.2 + 1.3 * hz), hy + s * r * (0.7 + 0.75 * hz));
       ctx.lineTo(hx + r * 0.2, hy + s * r * 1.0);
       ctx.fill();
     }

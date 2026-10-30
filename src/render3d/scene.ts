@@ -12,12 +12,12 @@ import {
   WebGLRenderer,
 } from 'three';
 import { EFFECT_COLORS, isBasic, type FoodType } from '../config/food';
-import type { SkinConfig } from '../config/skins';
+import { SKINS, type SkinConfig } from '../config/skins';
 import type { ZoneConfig } from '../config/zones';
 import { TIMED_EFFECTS, type Game } from '../core/state';
 import type { Fx } from '../fx/effects';
 import { Items3D } from './items';
-import { Overlay, type ScreenPoint } from './overlay';
+import { Overlay, type RivalTag, type ScreenPoint } from './overlay';
 import { Particles3D } from './particles';
 import { Snake3D } from './snake';
 import { SceneryLayer } from './scenery';
@@ -74,6 +74,7 @@ export class Renderer3D {
   private readonly sun = new DirectionalLight('#ffffff', 2);
   private readonly fog = new Fog('#000000', 20, 60);
   private readonly snake = new Snake3D();
+  private readonly rivalViews = new Map<number, Snake3D>();
   private readonly items = new Items3D();
   private readonly movers = new Movers3D();
   private readonly particles = new Particles3D(3000);
@@ -137,6 +138,8 @@ export class Renderer3D {
     if (this.cur) this.disposeLayers(this.cur);
     this.cur = null;
     this.items.clear();
+    for (const v of this.rivalViews.values()) this.scene.remove(v.group);
+    this.rivalViews.clear();
   }
 
   private makeLayers(game: Game, index: number): ZoneLayers {
@@ -213,6 +216,7 @@ export class Renderer3D {
     });
     const hx = this.snake.xs[0];
     const hz = this.snake.zs[0];
+    const tags = this.drawRivals(game, view, hx, hz);
     const desiredX = hx + this.snake.faceX * 1.2;
     const desiredZ = hz + this.snake.faceZ * 1.2;
     if (this.snapCamera) {
@@ -279,6 +283,50 @@ export class Renderer3D {
       this.rect,
       apple ? FOOD_EMOJI[apple.type] ?? '🍎' : '🍎',
     );
+    this.overlay.tags(tags);
+  }
+
+  /** Rival snakes (one Snake3D each) and their length labels. */
+  private drawRivals(game: Game, view: RenderView, hx: number, hz: number): RivalTag[] {
+    const tags: RivalTag[] = [];
+    const lethal = game.mode.rivals === 'lethal';
+    const playing = game.status === 'playing' || game.status === 'ready';
+    const step = game.rivalStepMs;
+    const seen = new Set<number>();
+    for (const r of game.rivals) {
+      if (!r.alive) continue;
+      seen.add(r.id);
+      let v = this.rivalViews.get(r.id);
+      if (!v) {
+        v = new Snake3D();
+        this.rivalViews.set(r.id, v);
+        this.scene.add(v.group);
+      }
+      v.update(r, {
+        alpha: game.status === 'playing' ? Math.min(1, r.moveTimer / step) : 1,
+        timeMs: view.timeMs + r.id * 777,
+        skin: SKINS[r.skin],
+        headScale: 1,
+        bulges: [],
+        ghost: !lethal,
+        glow: null,
+        visible: true,
+      });
+      // Only label rivals near the view (labels far off screen are noise).
+      const x = v.xs[0];
+      const z = v.zs[0];
+      if (playing && Math.abs(x - hx) + Math.abs(z - hz) < 30) {
+        const kind = !lethal ? 'calm' : r.snake.length <= game.snake.length ? 'prey' : 'threat';
+        tags.push({ at: this.project(x, 1.15, z), text: `${kind === 'threat' ? '⚠ ' : ''}${r.snake.length}`, kind });
+      }
+    }
+    for (const [id, v] of this.rivalViews) {
+      if (!seen.has(id)) {
+        this.scene.remove(v.group);
+        this.rivalViews.delete(id);
+      }
+    }
+    return tags;
   }
 
   /** World -> page coordinates (CSS px). */

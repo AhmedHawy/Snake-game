@@ -109,7 +109,12 @@ body {
   font-size: 18px;
   margin-top: 6px;
 }
-.btn-exit {
+.btn.btn-end {
+  background: linear-gradient(180deg, #ffb347, #f07800);
+  border-bottom-color: #a14f00;
+  color: #3a1500;
+}
+.btn.btn-exit {
   background: linear-gradient(180deg, #8a2a3a, #6b1d2b);
   border-bottom-color: #4a121c;
 }

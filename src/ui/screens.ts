@@ -17,7 +17,7 @@ export interface GameOverStats {
   longestCombo: number;
   zoneKey: I18nKey;
   loop: number;
-  timeUp: boolean;
+  reason: 'crash' | 'timeUp' | 'ended';
 }
 
 export interface UiHost {
@@ -26,6 +26,8 @@ export interface UiHost {
   resume(): void;
   restart(): void;
   toMenu(): void;
+  /** Ends the run on purpose, records the score and shows the summary. */
+  endRun(): void;
   updateSettings(patch: Partial<Settings>): void;
   tap(): void;
   bestFor(mode: ModeId, diff: DifficultyId): number;
@@ -363,6 +365,7 @@ export class Screens {
       this.button(t('pause.resume'), () => this.host.resume(), 'btn-play'),
       this.button(t('pause.restart'), () => this.host.restart()),
       this.button(t('menu.settings'), () => this.show('settings')),
+      this.button(`🏁 ${t('pause.end')}`, () => this.host.endRun(), 'btn-end'),
       this.button(t('pause.menu'), () => this.host.toMenu()),
     );
   }
@@ -373,7 +376,7 @@ export class Screens {
     return h(
       'div',
       { class: 'panel small over' },
-      h('h2', { class: 'center over-title', text: t(s.timeUp ? 'over.timeUp' : 'over.title') }),
+      h('h2', { class: 'center over-title', text: t(s.reason === 'timeUp' ? 'over.timeUp' : s.reason === 'ended' ? 'over.ended' : 'over.title') }),
       h('div', { class: 'big-score', text: String(s.score) }),
       s.newBest ? h('div', { class: 'new-best', text: `🏆 ${t('over.newBest')}` }) : null,
       h(

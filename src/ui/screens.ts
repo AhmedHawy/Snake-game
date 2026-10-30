@@ -22,6 +22,8 @@ export interface GameOverStats {
   reason: 'crash' | 'timeUp' | 'ended';
   /** Rivals defeated (rival modes only). */
   rivalsKilled?: number;
+  /** Rivals beaten by the ally. */
+  allyKills?: number;
   /** Skins unlocked by this run's points. */
   unlocked: SkinId[];
 }
@@ -282,6 +284,11 @@ export class Screens {
               onClick: () =>
                 this.tapThen(() => {
                   if (!open) return;
+                  // Tapping the dragon that is already selected confirms it and goes back.
+                  if (this.host.settings.skin === id) {
+                    this.show('main');
+                    return;
+                  }
                   this.host.updateSettings({ skin: id });
                   canvases.length = 0;
                   render();
@@ -436,6 +443,7 @@ export class Screens {
         stat('over.combo', `×${s.longestCombo}`),
         stat('over.zone', zoneText),
         s.rivalsKilled !== undefined ? stat('over.rivals', `⚔️ ${s.rivalsKilled}`) : null,
+        s.allyKills ? stat('over.allyKills', `🤝 ${s.allyKills}`) : null,
       ),
       ...s.unlocked.map((id) => h('div', { class: 'new-best unlocked', text: `🎉 ${t('over.unlocked', { name: t(SKINS[id].nameKey as I18nKey) })}` })),
       h('div', { class: 'grid2' }, this.button(t('over.retry'), () => this.host.restart(), 'btn-play'), this.button(t('over.menu'), () => this.host.toMenu())),

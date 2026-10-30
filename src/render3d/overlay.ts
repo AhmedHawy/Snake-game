@@ -14,8 +14,8 @@ export interface ScreenPoint {
 export interface RivalTag {
   at: ScreenPoint;
   text: string;
-  /** prey = you can eat it, threat = it can eat you, calm = harmless (Zen). */
-  kind: 'prey' | 'threat' | 'calm';
+  /** prey = you can eat it, threat = it can eat you, calm = harmless (Zen), ally = your friend. */
+  kind: 'prey' | 'threat' | 'calm' | 'ally';
 }
 
 export class Overlay {

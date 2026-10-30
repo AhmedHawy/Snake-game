@@ -49,6 +49,8 @@ export interface AbilityConfig {
   invisibleMs?: number;
   /** Extra points per rival hit. */
   bonusPerHit?: number;
+  /** Crowns rivals hit: they can be eaten whatever their size. */
+  markMs?: number;
   /** Stuns every rival on screen. */
   stunAllMs?: number;
   /** Pulls everyday food into the burst. */
@@ -71,5 +73,5 @@ export const ABILITIES: Record<AbilityId, AbilityConfig> = {
   lightning: { id: 'lightning', nameKey: 'ability.lightning', icon: '⚡', shape: 'chain', range: 7, damage: 2, bonusPerHit: 10, colors: ['#fff59d', '#ffd23f', '#ffffff'] },
   shadow: { id: 'shadow', nameKey: 'ability.shadow', icon: '🌑', shape: 'ring', range: 3, damage: 3, invisibleMs: 3000, colors: ['#6a1b9a', '#d500f9', '#120022'] },
   crystal: { id: 'crystal', nameKey: 'ability.crystal', icon: '💎', shape: 'fan', range: 5, damage: 2, hazard: 'spikes', hazardMs: 4000, colors: ['#9ff3ff', '#ffd6f5', '#ffffff'] },
-  royal: { id: 'royal', nameKey: 'ability.royal', icon: '👑', shape: 'ring', range: 5, damage: 4, burnMs: 2000, stunAllMs: 2000, colors: ['#ffd23f', '#ff1f1f', '#ffffff', '#ff8c1a'] },
+  royal: { id: 'royal', nameKey: 'ability.royal', icon: '👑', shape: 'ring', range: 5, damage: 4, burnMs: 2000, stunAllMs: 2000, markMs: 4000, colors: ['#ffd23f', '#ff1f1f', '#ffffff', '#ff8c1a'] },
 };

@@ -45,8 +45,8 @@ describe('rivals mode', () => {
   it('spawns more rivals on harder difficulties', () => {
     const easy = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 1 });
     const extreme = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.extreme, seed: 1 });
-    expect(easy.rivals.length).toBe(DIFFICULTIES.easy.rivals);
-    expect(extreme.rivals.length).toBe(DIFFICULTIES.extreme.rivals);
+    expect(easy.enemies.length).toBe(DIFFICULTIES.easy.rivals);
+    expect(extreme.enemies.length).toBe(DIFFICULTIES.extreme.rivals);
     expect(new Game({ mode: MODES.classic, difficulty: DIFFICULTIES.easy, seed: 1 }).rivals.length).toBe(0);
     // Rivals start away from the player and never on the player's body.
     for (const r of extreme.rivals.filter((q) => q.alive)) {
@@ -170,5 +170,93 @@ describe('skin unlocks', () => {
     const locked = SKIN_ORDER.filter((id) => SKINS[id].unlockAt);
     const costs = locked.map((id) => SKINS[id].unlockAt!);
     expect([...costs].sort((a, b) => a - b)).toEqual(costs);
+  });
+});
+
+describe('ally', () => {
+  type Stepper = { stepRival(r: Rival, forced?: number): void };
+
+  it('joins Rivals mode only, wearing the player\'s dragon', () => {
+    const g = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 1, playerSkin: 'dragonFrost' });
+    expect(g.ally).toBeTruthy();
+    expect(g.ally!.skin).toBe('dragonFrost');
+    expect(g.enemies.every((r) => r.skin !== 'dragonFrost')).toBe(true);
+    expect(new Game({ mode: MODES.zen, difficulty: DIFFICULTIES.easy, seed: 1 }).ally).toBeUndefined();
+    expect(new Game({ mode: MODES.classic, difficulty: DIFFICULTIES.easy, seed: 1 }).ally).toBeUndefined();
+  });
+
+  it('the player passes through the ally; neither dies', () => {
+    const g = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 3 });
+    g.world.clear();
+    g.foods.length = 0;
+    g.setSnake(Array.from({ length: 4 }, (_, i) => ({ x: 0, y: i })));
+    g.dir = 0;
+    for (const o of g.enemies) {
+      o.alive = false;
+      o.dead = true;
+      o.cells.clear();
+    }
+    const ally = g.ally!;
+    putRival(ally, Array.from({ length: 9 }, (_, i) => ({ x: 2 - i, y: -1 })));
+    g.begin();
+    stepOnce(g);
+    stepOnce(g);
+    expect(g.status).toBe('playing');
+    expect(ally.alive).toBe(true);
+  });
+
+  it('beats smaller rivals and dies against bigger ones', () => {
+    const g = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 3 });
+    g.world.clear();
+    g.foods.length = 0;
+    g.setSnake(Array.from({ length: 4 }, (_, i) => ({ x: 50, y: 50 + i })));
+    const [small, big, ...rest] = g.enemies;
+    for (const o of rest) {
+      o.alive = false;
+      o.dead = true;
+      o.cells.clear();
+    }
+    const ally = g.ally!;
+    // Ally (6) heading up at (0,0); small rival (4) lies across y = -1.
+    putRival(ally, Array.from({ length: 6 }, (_, i) => ({ x: 0, y: i })));
+    putRival(small, Array.from({ length: 4 }, (_, i) => ({ x: 2 - i, y: -1 })));
+    putRival(big, Array.from({ length: 12 }, (_, i) => ({ x: 6 - i, y: -3 })));
+    g.begin();
+    g.events.length = 0;
+    const stepper = g as unknown as Stepper;
+    stepper.stepRival(ally, 0);
+    expect(small.alive).toBe(false);
+    expect(ally.alive).toBe(true);
+    expect(g.allyKills).toBe(1);
+    stepper.stepRival(ally, 0);
+    stepper.stepRival(ally, 0); // into the big rival
+    expect(ally.alive).toBe(false);
+    expect(big.alive).toBe(true);
+    expect(g.events.some((e) => e.type === 'rivalKilled' && e.rival.ally)).toBe(true);
+  });
+});
+
+describe('emperor', () => {
+  it('crowned rivals can be eaten even when bigger than the player', () => {
+    const g = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 3, playerSkin: 'dragonEmperor' });
+    g.world.clear();
+    g.foods.length = 0;
+    g.setSnake(Array.from({ length: 4 }, (_, i) => ({ x: 0, y: i })));
+    g.dir = 0;
+    const [r, ...others] = g.rivals;
+    for (const o of others) {
+      o.alive = false;
+      o.dead = true;
+      o.cells.clear();
+    }
+    putRival(r, Array.from({ length: 20 }, (_, i) => ({ x: 2 - i, y: -1 })));
+    g.begin();
+    g.fireBreath();
+    expect(r.alive).toBe(true);
+    expect(r.markedMs).toBeGreaterThan(0);
+    expect(r.snake.length).toBeGreaterThan(g.snake.length);
+    stepOnce(g);
+    expect(g.status).toBe('playing');
+    expect(r.alive).toBe(false);
   });
 });

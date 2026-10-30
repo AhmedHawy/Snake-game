@@ -25,6 +25,7 @@ import { hideZoneBanner, showBanner, showZoneBanner } from './ui/banner';
 import type { AbilityId } from './config/abilities';
 import { Hud } from './ui/hud';
 import { AbilityButton } from './ui/abilityButton';
+import { Portraits } from './ui/portraits';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
 
@@ -49,6 +50,7 @@ export class App implements UiHost {
   private readonly dpad = new DPad($('dpad'), (d) => this.steer(d, true));
   private readonly hint = $('hint');
   private readonly abilityBtn = new AbilityButton($('app'), () => this.fire());
+  private readonly portraits = new Portraits($('app'));
   private lastTapMs = 0;
   private game!: Game;
   private layout!: BoardLayout;
@@ -345,6 +347,7 @@ export class App implements UiHost {
     // The ability button sits in the board corner away from the D-pad.
     this.abilityBtn.place(this.layout.area, this.settings.dpad && this.settings.dpadSide === 'right' ? 'left' : 'right');
     this.abilityBtn.show(this.inGame);
+    this.portraits.place(this.layout.area);
   }
 
   private onResize(): void {
@@ -464,10 +467,18 @@ export class App implements UiHost {
           const rs = SKINS[e.rival.skin];
           const now = performance.now();
           const colors = e.cells.map((_, i) => (i === 0 ? rs.head : rs.body(i, e.cells.length, now)));
-          this.fx.onRivalKilled(e.cells, colors, e.byPlayer ? e.points : 0);
-          if (e.byPlayer) {
+          this.fx.onRivalKilled(e.cells, colors, e.byPlayer || e.byAlly ? e.points : 0);
+          if (e.rival.ally) {
+            // The ally fell: tell the player.
+            showBanner('💀', t('ally.died'), '#ff5c5c');
+            this.sfx.crash();
+            haptics.bad();
+          } else if (e.byPlayer) {
             this.sfx.golden();
             haptics.powerUp();
+          } else if (e.byAlly) {
+            this.fx.popup(e.cells[0].x, 1.7, e.cells[0].y, `🤝 ${t('ally.kill')}`, '#6bc8ff', 22);
+            this.sfx.combo(3);
           }
           break;
         }
@@ -533,6 +544,7 @@ export class App implements UiHost {
       loop: g.loop,
       reason,
       rivalsKilled: g.mode.rivals === 'lethal' ? g.rivalsKilled : undefined,
+      allyKills: g.mode.rivals === 'lethal' ? g.allyKills : undefined,
       unlocked,
     });
   }
@@ -553,6 +565,8 @@ export class App implements UiHost {
       const ab = g.ability;
       this.abilityBtn.update(ab.icon, ab.colors[0], g.charges, g.strongCharge);
     }
+    if (this.inGame && g.mode.rivals === 'lethal' && g.status !== 'over') this.portraits.update(g);
+    else this.portraits.hide();
     const showHint = this.inGame && !this.paused && g.status === 'ready' && this.screens.current === 'none';
     if (showHint === this.hint.classList.contains('hidden')) {
       this.hint.textContent = t(matchMedia('(pointer: fine)').matches ? 'hud.swipeDesktop' : 'hud.swipe');

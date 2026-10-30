@@ -326,8 +326,8 @@ export class Renderer3D {
       const x = v.xs[0];
       const z = v.zs[0];
       if (playing && Math.abs(x - hx) + Math.abs(z - hz) < 30) {
-        const kind = !lethal ? 'calm' : r.snake.length <= game.snake.length || r.frozenMs > 0 ? 'prey' : 'threat';
-        const icon = r.frozenMs > 0 ? '❄️ ' : r.burnMs > 0 ? '🔥 ' : kind === 'threat' ? '⚠ ' : '';
+        const kind = r.ally ? 'ally' : !lethal ? 'calm' : r.snake.length <= game.snake.length || game.isEdible(r) ? 'prey' : 'threat';
+        const icon = r.ally ? '🤝 ' : r.markedMs > 0 ? '👑 ' : r.frozenMs > 0 ? '❄️ ' : r.burnMs > 0 ? '🔥 ' : kind === 'threat' ? '⚠ ' : '';
         tags.push({ at: this.project(x, 1.15, z), text: `${icon}${r.snake.length}`, kind });
       }
     }
@@ -374,6 +374,7 @@ function easeOut(t: number): number {
 
 /** Glow color showing a rival's breath status (frozen, burning, poisoned...). */
 function rivalGlow(r: Rival, timeMs: number): string | null {
+  if (r.markedMs > 0) return '#ffd23f';
   if (r.frozenMs > 0) return '#9fdcff';
   if (r.burnMs > 0) return '#ff6a00';
   if (r.poisonMs > 0) return '#7dff3b';

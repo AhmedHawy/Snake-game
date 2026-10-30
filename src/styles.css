@@ -927,3 +927,84 @@ button {
   25% { transform: translateX(-6px); }
   75% { transform: translateX(6px); }
 }
+.rival-tag.ally {
+  background: #2f80ed;
+}
+
+/* ---------- Rivals mode roster (top of the board) ---------- */
+.portraits {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+  direction: ltr;
+}
+.portraits-center {
+  transform: translateX(-50%);
+}
+.portraits-right {
+  transform: translateX(-100%);
+}
+.portrait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.portrait-ring {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: rgba(10, 14, 40, 0.75);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.portrait img {
+  width: 36px;
+  height: 36px;
+}
+.portrait b {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(10, 14, 40, 0.8);
+}
+.portrait.player .portrait-ring {
+  width: 46px;
+  height: 46px;
+  border-color: #ffd23f;
+}
+.portrait.player img {
+  width: 44px;
+  height: 44px;
+}
+.portrait.player b {
+  background: #d4a017;
+}
+.portrait.ally .portrait-ring {
+  border-color: #2f80ed;
+}
+.portrait.ally b {
+  background: #2f80ed;
+}
+.portrait.prey .portrait-ring {
+  border-color: #2fbf45;
+}
+.portrait.threat .portrait-ring {
+  border-color: #e8475b;
+}
+.portrait.threat b {
+  background: #e8475b;
+}
+.portrait.edible .portrait-ring {
+  border-color: #ffd23f;
+  box-shadow: 0 0 10px #ffd23f;
+}

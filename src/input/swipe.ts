@@ -6,7 +6,8 @@ import type { Dir } from '../core/types';
 export interface SwipeOptions {
   /** Dead-zone in CSS px (may depend on the current cell size). */
   deadZone: () => number;
-  onDir: (d: Dir) => void;
+  /** `dx`, `dy`: finger travel since the gesture started (picks the U-turn side). */
+  onDir: (d: Dir, dx: number, dy: number) => void;
   onTap?: () => void;
 }
 
@@ -16,6 +17,8 @@ export class SwipeInput {
   private id: number | null = null;
   private ox = 0;
   private oy = 0;
+  private sx = 0;
+  private sy = 0;
   private startMs = 0;
   private moved = false;
   private lastDir: Dir | null = null;
@@ -38,8 +41,8 @@ export class SwipeInput {
     if (this.id !== null) return;
     e.preventDefault();
     this.id = e.pointerId;
-    this.ox = e.clientX;
-    this.oy = e.clientY;
+    this.ox = this.sx = e.clientX;
+    this.oy = this.sy = e.clientY;
     this.startMs = performance.now();
     this.moved = false;
     this.lastDir = null;
@@ -70,7 +73,7 @@ export class SwipeInput {
     this.moved = true;
     if (dir === this.lastDir) return;
     this.lastDir = dir;
-    this.opts.onDir(dir);
+    this.opts.onDir(dir, x - this.sx, y - this.sy);
   }
 
   private up = (e: PointerEvent): void => {

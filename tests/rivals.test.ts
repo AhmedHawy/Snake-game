@@ -155,15 +155,19 @@ describe('single world', () => {
 });
 
 describe('skin unlocks', () => {
-  it('unlocks dragons by total points; old skins stay free', () => {
+  it('every skin is a dragon with an ability; 6 free, the rest unlock by points', () => {
+    expect(SKIN_ORDER.length).toBe(14);
+    for (const id of SKIN_ORDER) {
+      expect(SKINS[id].dragon).toBeTruthy();
+      expect(SKINS[id].ability).toBeTruthy();
+    }
+    expect(new Set(SKIN_ORDER.map((id) => SKINS[id].ability)).size).toBe(14);
+    expect(SKIN_ORDER.filter((id) => !SKINS[id].unlockAt).length).toBe(6);
     expect(isUnlocked('classic', 0)).toBe(true);
     expect(isUnlocked('dragon', 0)).toBe(true);
     expect(isUnlocked('dragonJade', 999)).toBe(false);
     expect(isUnlocked('dragonJade', 1000)).toBe(true);
     const locked = SKIN_ORDER.filter((id) => SKINS[id].unlockAt);
-    expect(locked.length).toBeGreaterThanOrEqual(10);
-    // At least two dragons are free from the start.
-    expect(SKIN_ORDER.filter((id) => SKINS[id].dragon && !SKINS[id].unlockAt).length).toBeGreaterThanOrEqual(2);
     const costs = locked.map((id) => SKINS[id].unlockAt!);
     expect([...costs].sort((a, b) => a - b)).toEqual(costs);
   });

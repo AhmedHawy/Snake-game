@@ -4,8 +4,9 @@
 // World units: 1 = one cell; a cell (x, y) sits at world (x, 0, y).
 import { EFFECT_COLORS, FOODS } from '../config/food';
 import type { SkinConfig } from '../config/skins';
+import { ABILITIES, type AbilityId } from '../config/abilities';
 import { TIMED_EFFECTS, type FoodItem, type Game } from '../core/state';
-import type { Vec } from '../core/types';
+import { DIRS, type Dir, type Vec } from '../core/types';
 import { Particles } from './particles';
 
 export interface Popup {
@@ -37,6 +38,7 @@ export class Fx {
   timeScale = 1;
   private slowmoLeft = 0;
   private trailTimer = 0;
+  private sprintTimer = 0;
   private bulgeSteps: number[] = [];
   private bulgeOut: number[] = [];
 
@@ -135,6 +137,93 @@ export class Fx {
     }
   }
 
+  /** Dragon breath: a burst of the ability's particles over the cells it hits. */
+  onBreath(ability: AbilityId, from: Vec, dir: Dir, cells: Vec[], targets: Vec[], strong: boolean): void {
+    const ab = ABILITIES[ability];
+    const p = this.particles;
+    const d = DIRS[dir];
+    const mx = from.x + d.x * 0.55;
+    const mz = from.y + d.y * 0.55;
+    const col = (k: number) => ab.colors[k % ab.colors.length];
+    const scale = strong ? 1.35 : 1;
+    if (ab.shape === 'ring') {
+      // Expanding shockwave from the dragon in every direction.
+      const n = Math.round(70 * scale);
+      const speed = ab.range * 2.6;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2;
+        p.emit(mx, 0.35, mz, Math.cos(a) * speed, 0.4 + Math.random(), Math.sin(a) * speed, 650, 0.32, col(k), { drag: 0.6, glow: true });
+        p.emit(mx, 0.6, mz, Math.cos(a) * speed * 0.6, 1.5 + Math.random() * 2, Math.sin(a) * speed * 0.6, 700, 0.22, col(k + 1), { drag: 0.4, glow: k % 2 === 0 });
+      }
+    } else if (ab.shape === 'chain') {
+      // Bolts from the mouth to each rival, then between rivals.
+      let fx = mx;
+      let fz = mz;
+      const ends = targets.length ? targets : cells.slice(-1);
+      for (const t of ends) {
+        const len = Math.hypot(t.x - fx, t.y - fz);
+        const steps = Math.max(4, Math.round(len * 3));
+        for (let k = 0; k <= steps; k++) {
+          const u = k / steps;
+          const j = k === 0 || k === steps ? 0 : (Math.random() - 0.5) * 0.7;
+          p.emit(fx + (t.x - fx) * u + j, 0.5 + Math.random() * 0.3, fz + (t.y - fz) * u + j, 0, 0.3, 0, 380, 0.24, col(k), { glow: true });
+        }
+        p.burst(t.x, 0.5, t.y, col(0), 14, 4, 0.16, 450, { glow: true });
+        fx = t.x;
+        fz = t.y;
+      }
+    } else {
+      // Jets: particles leave the mouth and travel through the breath cells.
+      for (const c of cells) {
+        const dx = c.x - mx;
+        const dz = c.y - mz;
+        const dist = Math.hypot(dx, dz) || 1;
+        const n = Math.round((ab.shape === 'point' ? 4 : 6) * scale);
+        for (let k = 0; k < n; k++) {
+          const u = Math.random();
+          const life = 380 + Math.random() * 260;
+          // Spread the particles along the way so the breath reads as a stream.
+          const sx = mx + dx * u * 0.6;
+          const sz = mz + dz * u * 0.6;
+          const v = (dist * (1 - u * 0.6)) / (life / 1000);
+          p.emit(sx, 0.45 + Math.random() * 0.25, sz, (dx / dist) * v * 0.9 + (Math.random() - 0.5), 0.5 + Math.random() * 1.2, (dz / dist) * v * 0.9 + (Math.random() - 0.5), life, 0.2 + Math.random() * 0.22, col(k), {
+            drag: 0.9,
+            glow: k % 3 !== 2,
+          });
+        }
+      }
+      if (ab.shape === 'point' && cells.length) {
+        // Black hole: a swirling disc around the centre.
+        const cx = from.x + d.x * ab.range;
+        const cz = from.y + d.y * ab.range;
+        for (let k = 0; k < 60; k++) {
+          const a = (k / 60) * Math.PI * 2;
+          const r = 2.2;
+          p.emit(cx + Math.cos(a) * r, 0.4, cz + Math.sin(a) * r, -Math.cos(a) * 3 - Math.sin(a) * 4, 0.2, -Math.sin(a) * 3 + Math.cos(a) * 4, 700, 0.24, col(k), { glow: true, drag: 0.3 });
+        }
+      }
+    }
+    this.headPop = 1;
+    this.popup(from.x, 1.5, from.y, ab.icon, '#ffffff', strong ? 34 : 26);
+    if (strong || ability === 'royal') this.addShake(0.35);
+  }
+
+  /** A rival loses segments to a breath. */
+  onRivalHit(removed: Vec[], colors: string[], points: number): void {
+    removed.forEach((c, i) => this.particles.burst(c.x, 0.4, c.y, colors[i % colors.length], 6, 3.5, 0.2, 600, { drag: 0.2, gravity: 10, bounce: true }));
+    const c = removed[0];
+    if (c) this.popup(c.x, 1.1, c.y, `+${points}`, '#7dff6b', 22);
+  }
+
+  /** Obstacles broken by a breath. */
+  onSmash(cells: Vec[], color: string): void {
+    for (const c of cells) {
+      this.particles.burst(c.x, 0.5, c.y, color, 14, 5, 0.22, 800, { drag: 0.15, gravity: 14, bounce: true });
+      this.particles.burst(c.x, 0.5, c.y, '#ffd23f', 6, 4, 0.12, 400, { glow: true });
+    }
+    this.addShake(0.2);
+  }
+
   addShake(amount: number): void {
     this.trauma = Math.min(1, this.trauma + amount);
   }
@@ -163,6 +252,17 @@ export class Fx {
       p.age += dtMs;
       p.y += (dtMs / 1000) * 1.4;
       if (p.age >= p.life) this.popups.splice(i, 1);
+    }
+
+    // Sprint: speed streaks behind the head.
+    if (game && head && game.status === 'playing' && game.sprintMs > 0) {
+      const d = DIRS[game.dir];
+      this.sprintTimer -= dtMs;
+      while (this.sprintTimer <= 0) {
+        this.sprintTimer += 25;
+        const side = (Math.random() - 0.5) * 0.9;
+        this.particles.emit(head.x - d.x * 0.6 + d.y * side, 0.3 + Math.random() * 0.4, head.z - d.y * 0.6 + d.x * side, -d.x * 4, 0, -d.y * 4, 260, 0.1, '#ffffff', { glow: true });
+      }
     }
 
     // Power-up trail: sparkles from the head while an effect is active.

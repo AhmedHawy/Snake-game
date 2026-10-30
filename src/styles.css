@@ -846,3 +846,9 @@ button {
 .rival-tag.calm {
   background: rgba(40, 50, 70, 0.7);
 }
+.skin .ability {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd98a;
+  opacity: 0.9;
+}

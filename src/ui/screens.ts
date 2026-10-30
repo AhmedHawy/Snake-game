@@ -7,6 +7,7 @@ import type { BoardSize } from '../core/grid';
 import { SKINS, SKIN_ORDER, isUnlocked, type SkinId } from '../config/skins';
 import { ZONES } from '../config/zones';
 import { drawSkinPreview } from '../render/preview';
+import { ABILITIES } from '../config/abilities';
 import type { Settings } from '../storage/storage';
 import { ICONS, h } from './dom';
 
@@ -261,15 +262,17 @@ export class Screens {
   }
 
   private skinPicker(): HTMLElement {
-    const canvases: [HTMLCanvasElement, SkinId][] = [];
+    // [canvas, skin, unlocked]: locked dragons stay still until they unlock.
+    const canvases: [HTMLCanvasElement, SkinId, boolean][] = [];
     const grid = h('div', { class: 'skins' });
     const total = this.host.totalPoints();
     const render = () => {
       grid.replaceChildren(
         ...SKIN_ORDER.map((id) => {
           const cv = h('canvas', { class: 'skin-canvas' });
-          canvases.push([cv, id]);
           const open = isUnlocked(id, total);
+          canvases.push([cv, id, open]);
+          const ab = ABILITIES[SKINS[id].ability];
           const need = SKINS[id].unlockAt ?? 0;
           return h(
             'button',
@@ -286,6 +289,7 @@ export class Screens {
             },
             cv,
             h('span', { text: t(SKINS[id].nameKey as I18nKey) }),
+            h('small', { class: 'ability', text: `${ab.icon} ${t(ab.nameKey as I18nKey)}` }),
             open ? null : h('small', { class: 'lock', text: t('skins.locked', { n: need }) }),
             open ? null : h('span', { class: 'lock-bar', style: { width: `${Math.min(100, (total / need) * 100)}%` } }),
           );
@@ -294,7 +298,7 @@ export class Screens {
     };
     render();
     const anim = (now: number) => {
-      for (const [cv, id] of canvases) drawSkinPreview(cv, SKINS[id], now);
+      for (const [cv, id, open] of canvases) drawSkinPreview(cv, SKINS[id], open ? now : 0);
       this.previewRaf = requestAnimationFrame(anim);
     };
     this.previewRaf = requestAnimationFrame(anim);

@@ -22,7 +22,8 @@ import { MODES, PORTAL_COLORS, type ModeConfig } from '../config/modes';
 import { FOODS_PER_ZONE, ZONES, type ZoneConfig } from '../config/zones';
 import { Rng } from './rng';
 import { CHUNK, ObstacleWorld, cellKey, randomCellNear } from './spawn';
-import type { SkinId } from '../config/skins';
+import { SKINS, type SkinId } from '../config/skins';
+import { ABILITIES, type AbilityConfig, type AbilityId, type HazardKind } from '../config/abilities';
 import { DIRS, chebyshev, isOpposite, manhattan, type Dir, type Vec } from './types';
 
 export interface FoodItem {
@@ -63,7 +64,20 @@ export type GameEvent =
   | { type: 'portal'; from: Vec; to: Vec }
   | { type: 'expire'; food: FoodItem }
   | { type: 'spawn'; food: FoodItem }
-  | { type: 'rivalKilled'; rival: Rival; cells: Vec[]; byPlayer: boolean; points: number };
+  | { type: 'rivalKilled'; rival: Rival; cells: Vec[]; byPlayer: boolean; points: number }
+  | { type: 'breath'; ability: AbilityId; from: Vec; dir: Dir; cells: Vec[]; targets: Vec[]; strong: boolean }
+  | { type: 'rivalHit'; rival: Rival; removed: Vec[]; points: number }
+  | { type: 'smash'; cells: Vec[]; points: number }
+  | { type: 'wave'; wave: number }
+  | { type: 'waveCleared'; wave: number };
+
+/** A patch of ground left by a breath that hurts rivals crossing it. */
+export interface Hazard {
+  x: number;
+  y: number;
+  kind: HazardKind;
+  untilMs: number;
+}
 
 /** A computer-controlled rival snake. */
 export interface Rival {
@@ -77,8 +91,19 @@ export interface Rival {
   moveTimer: number;
   skin: SkinId;
   alive: boolean;
-  /** Time until a dead rival comes back (ms). */
+  /** Killed for good (dead rivals never come back; a new wave brings new ones). */
+  dead: boolean;
+  /** Retry delay while no free spot was found to place it (ms). */
   respawnMs: number;
+  /** Breath status effects (ms left). */
+  burnMs: number;
+  poisonMs: number;
+  frozenMs: number;
+  stunMs: number;
+  confuseMs: number;
+  fearMs: number;
+  /** Accumulates time for burn / poison ticks (1 segment per second). */
+  dotMs: number;
   /** Cell occupancy counts (fast collision checks). */
   cells: Map<number, number>;
   /** Always 'playing' (lets the renderer treat it like the player). */
@@ -86,11 +111,19 @@ export interface Rival {
 }
 
 /** Skins rivals pick from (the player's own skin is skipped). */
-const RIVAL_SKINS: SkinId[] = ['tiger', 'candy', 'ocean', 'rainbow', 'neon', 'classic'];
+const RIVAL_SKINS: SkinId[] = ['tiger', 'ocean', 'rainbow', 'classic', 'dragonSea', 'dragon', 'lava'];
 /** Rival lengths relative to the player: some are prey, some are threats. */
 const RIVAL_LENGTH_OFFSETS = [-3, 4, -1, 7, -4];
 const RIVAL_POINTS_PER_SEGMENT = 5;
-const RIVAL_RESPAWN_MS = 2500;
+/** Pause between clearing a wave and the next one. */
+export const WAVE_DELAY_MS = 5000;
+const MAX_RIVALS = 8;
+/** Swiping the way the dragon already goes: sprint. */
+export const SPRINT_MS = 1500;
+export const SPRINT_MAX_MS = 3000;
+export const SPRINT_FACTOR = 1.4;
+/** Points for each obstacle cell broken by a breath. */
+const SMASH_POINTS = 5;
 
 export interface GameOptions {
   mode: ModeConfig;
@@ -160,6 +193,17 @@ export class Game {
   crashAt: Vec | null = null;
   rivals: Rival[] = [];
   rivalsKilled = 0;
+  /** Rival wave number (Rivals mode). */
+  wave = 1;
+  /** Countdown to the next wave once every rival is dead (ms, 0 = not waiting). */
+  waveTimerMs = 0;
+  /** Sprint time left (ms). */
+  sprintMs = 0;
+  /** Rivals can't see the player (shadow breath). */
+  invisibleMs = 0;
+  hazards = new Map<number, Hazard>();
+  /** Obstacle cells broken by breaths (counted for the stats). */
+  smashed = 0;
   /** Player skin (rivals avoid wearing the same one). */
   playerSkin: SkinId = 'classic';
   events: GameEvent[] = [];
@@ -212,6 +256,7 @@ export class Game {
     let ms = this.baseStepMs;
     if (this.effects.speed > 0) ms *= SPEED_BOOST_FACTOR;
     if (this.effects.slow > 0) ms *= SLOW_MO_FACTOR;
+    if (this.sprintMs > 0) ms /= SPRINT_FACTOR;
     return Math.max(ABSOLUTE_MIN_STEP_MS, ms);
   }
 
@@ -229,8 +274,12 @@ export class Game {
     return this.world.has(x, y);
   }
 
-  /** Queue a turn. Same-direction and 180° turns (relative to the last queued move) are ignored. */
-  steer(d: Dir): boolean {
+  /**
+   * Queue a turn. Steering the way the dragon already goes sprints; steering
+   * backwards makes a U-turn into the next lane (`lean` picks the side,
+   * otherwise the side with more room).
+   */
+  steer(d: Dir, lean?: Dir): boolean {
     if (this.status === 'dying' || this.status === 'over') return false;
     const last = this.queue.length ? this.queue[this.queue.length - 1] : this.dir;
     if (this.status === 'ready') {
@@ -239,10 +288,45 @@ export class Game {
       this.begin();
       return true;
     }
-    if (d === last || isOpposite(d, last)) return false;
+    if (d === last) {
+      if (this.queue.length > 0) return false;
+      this.sprintMs = Math.min(SPRINT_MAX_MS, this.sprintMs + SPRINT_MS);
+      return true;
+    }
+    if (isOpposite(d, last)) {
+      if (this.queue.length > MAX_QUEUE - 2) return false;
+      const side = lean !== undefined && !isOpposite(lean, last) && lean !== last ? lean : this.roomierSide(last);
+      this.queue.push(side, d);
+      return true;
+    }
     if (this.queue.length >= MAX_QUEUE) return false;
     this.queue.push(d);
     return true;
+  }
+
+  /** The side (perpendicular to `dir`) with more free room around the head, for U-turns. */
+  private roomierSide(dir: Dir): Dir {
+    const a = ((dir + 1) % 4) as Dir;
+    const b = ((dir + 3) % 4) as Dir;
+    const room = (side: Dir) => {
+      const h = this.head;
+      const s1 = { x: h.x + DIRS[side].x, y: h.y + DIRS[side].y };
+      const free = (x: number, y: number) => (this.effects.ghost > 0 || !this.isBlocked(x, y)) && !this.snakeCells.has(cellKey(x, y)) && !this.moverAt(x, y);
+      if (!free(s1.x, s1.y)) return -1;
+      // Count free cells in a small area on that side.
+      let n = 0;
+      for (let k = 1; k <= 4; k++) {
+        for (let j = -3; j <= 3; j++) {
+          const x = h.x + DIRS[side].x * k + DIRS[dir].x * j;
+          const y = h.y + DIRS[side].y * k + DIRS[dir].y * j;
+          if (free(x, y) && !this.rivalAt(x, y)) n++;
+        }
+      }
+      return n;
+    };
+    const ra = room(a);
+    const rb = room(b);
+    return rb > ra ? b : a;
   }
 
   /** Start moving in the current direction (tap to start). */
@@ -257,6 +341,9 @@ export class Game {
     this.timeMs += dt;
 
     for (const e of TIMED_EFFECTS) if (this.effects[e] > 0) this.effects[e] = Math.max(0, this.effects[e] - dt);
+    if (this.sprintMs > 0) this.sprintMs = Math.max(0, this.sprintMs - dt);
+    if (this.invisibleMs > 0) this.invisibleMs = Math.max(0, this.invisibleMs - dt);
+    if (this.hazards.size) for (const [k, hz] of this.hazards) if (hz.untilMs <= this.timeMs) this.hazards.delete(k);
 
     for (let i = this.foods.length - 1; i >= 0; i--) {
       const f = this.foods[i];
@@ -319,7 +406,7 @@ export class Game {
     // Rivals: the longer snake wins (ties go to the player); ghost passes through.
     const rival = this.mode.rivals === 'lethal' && this.effects.ghost <= 0 ? this.rivalAt(nx, ny) : undefined;
     if (rival) {
-      if (this.snake.length >= rival.snake.length) this.killRival(rival, true);
+      if (this.snake.length >= rival.snake.length || rival.frozenMs > 0) this.killRival(rival, true);
       else return this.crash({ x: nx, y: ny });
     }
 
@@ -401,6 +488,7 @@ export class Game {
     this.events.push({ type: 'eat', food, points, multiplier: mult });
 
     if (cfg.countsAsFood) {
+      this.breathe(food.type === 'golden');
       this.foodsEaten++;
       if (this.mode.zones && this.foodsEaten % FOODS_PER_ZONE === 0) this.advanceZone();
     }
@@ -505,7 +593,15 @@ export class Game {
       moveTimer: this.rng.next() * 100,
       skin: skins[index % skins.length],
       alive: false,
+      dead: false,
       respawnMs: 0,
+      burnMs: 0,
+      poisonMs: 0,
+      frozenMs: 0,
+      stunMs: 0,
+      confuseMs: 0,
+      fearMs: 0,
+      dotMs: 0,
       cells: new Map(),
       status: 'playing',
     };
@@ -515,7 +611,8 @@ export class Game {
 
   /** Puts a rival somewhere near (but not too near) the player, in a straight free line. */
   private placeRival(r: Rival, index: number): boolean {
-    const offset = RIVAL_LENGTH_OFFSETS[index % RIVAL_LENGTH_OFFSETS.length] + this.rng.int(3) - 1;
+    // Later waves bring longer rivals.
+    const offset = RIVAL_LENGTH_OFFSETS[index % RIVAL_LENGTH_OFFSETS.length] + this.rng.int(3) - 1 + (this.wave - 1) * 2;
     const len = Math.max(3, Math.min(60, this.snake.length + offset));
     const near = this.viewRadius + 4;
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -554,24 +651,219 @@ export class Game {
     }
     this.events.push({ type: 'rivalKilled', rival: r, cells: r.snake.map((c) => ({ ...c })), byPlayer, points });
     r.alive = false;
-    r.respawnMs = RIVAL_RESPAWN_MS;
+    r.dead = true;
     r.cells.clear();
+  }
+
+  /** Removes `n` tail segments from a rival; it dies once shorter than 3. */
+  private damageRival(r: Rival, n: number, bonus = 0): number {
+    if (!r.alive || n <= 0) return 0;
+    this.score += bonus;
+    if (r.snake.length - n < MIN_LENGTH) {
+      // Too weak to survive: the player defeats it (and gets its points).
+      const len = r.snake.length;
+      this.killRival(r, true);
+      return len;
+    }
+    const removed = r.snake.splice(r.snake.length - n, n);
+    for (const c of removed) subCount(r.cells, cellKey(c.x, c.y));
+    r.prevSnake.length = Math.min(r.prevSnake.length, r.snake.length);
+    r.pendingGrow = 0;
+    const points = n * RIVAL_POINTS_PER_SEGMENT;
+    this.score += points;
+    this.events.push({ type: 'rivalHit', rival: r, removed, points: points + bonus });
+    return n;
+  }
+
+  /** Knocks a rival back up to `n` cells (stops at anything in the way). */
+  private pushRival(r: Rival, d: Vec, n: number): void {
+    for (let k = 0; k < n; k++) {
+      const moved = r.snake.map((c) => ({ x: c.x + d.x, y: c.y + d.y }));
+      const ok = moved.every((c) => {
+        if (this.isBlocked(c.x, c.y) || this.moverAt(c.x, c.y) || this.snakeCells.has(cellKey(c.x, c.y))) return false;
+        const o = this.rivalAt(c.x, c.y);
+        return !o || o === r;
+      });
+      if (!ok) return;
+      r.snake = moved;
+      r.prevSnake = moved.map((c) => ({ ...c }));
+      r.cells.clear();
+      for (const c of moved) addCount(r.cells, cellKey(c.x, c.y));
+    }
+  }
+
+  // --------------------------------------------------------------- breath
+
+  /** The player's breath ability (from the dragon skin). */
+  get ability(): AbilityConfig {
+    return ABILITIES[SKINS[this.playerSkin]?.ability ?? 'fire'];
+  }
+
+  /** Cells covered by a breath from the head (see BreathShape). */
+  breathCells(ab: AbilityConfig, strong: boolean): Vec[] {
+    const h = this.head;
+    const d = DIRS[this.dir];
+    const p = DIRS[(this.dir + 1) % 4];
+    const range = strong ? ab.range * 2 : ab.range;
+    const cells: Vec[] = [];
+    const seen = new Set<number>();
+    const add = (x: number, y: number) => {
+      const k = cellKey(x, y);
+      if (seen.has(k) || (x === h.x && y === h.y)) return;
+      seen.add(k);
+      cells.push({ x, y });
+    };
+    const ahead = (k: number, j = 0) => add(h.x + d.x * k + p.x * j, h.y + d.y * k + p.y * j);
+    switch (ab.shape) {
+      case 'line':
+        for (let k = 1; k <= range; k++) ahead(k);
+        break;
+      case 'cone':
+        for (let k = 1; k <= range; k++) {
+          const w = Math.min(3, Math.floor(k / 2));
+          for (let j = -w; j <= w; j++) ahead(k, j);
+        }
+        break;
+      case 'wide':
+        for (let k = 1; k <= range; k++) for (let j = -2; j <= 2; j++) ahead(k, j);
+        break;
+      case 'ring': {
+        const r = strong ? Math.ceil(ab.range * 1.5) : ab.range;
+        for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) add(h.x + x, h.y + y);
+        break;
+      }
+      case 'fan':
+        for (let k = 1; k <= range; k++) {
+          ahead(k);
+          ahead(k, k);
+          ahead(k, -k);
+        }
+        break;
+      case 'point': {
+        const r = strong ? 3 : 2;
+        const cx = h.x + d.x * ab.range;
+        const cy = h.y + d.y * ab.range;
+        for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) add(cx + x, cy + y);
+        break;
+      }
+      case 'chain':
+        for (let k = 1; k <= 4; k++) ahead(k);
+        break;
+    }
+    return cells;
+  }
+
+  /** Dragon breath after every meal: breaks obstacles and (Rivals mode) weakens rivals. */
+  private breathe(strong: boolean): void {
+    const ab = this.ability;
+    const h = this.head;
+    const d = DIRS[this.dir];
+    const cells = this.breathCells(ab, strong);
+
+    // Smash obstacles and moving obstacles in the way.
+    const smashed: Vec[] = [];
+    for (const c of cells) {
+      if (this.world.remove(c.x, c.y)) smashed.push(c);
+      const m = this.movers.findIndex((mv) => mv.pos.x === c.x && mv.pos.y === c.y);
+      if (m >= 0) {
+        this.movers.splice(m, 1);
+        smashed.push(c);
+      }
+    }
+
+    // Rivals hit (only where rivals fight back).
+    const hit: Rival[] = [];
+    const targets: Vec[] = [];
+    if (this.mode.rivals === 'lethal') {
+      if (ab.shape === 'chain') {
+        const reach = strong ? ab.range * 2 : ab.range;
+        const near = this.rivals
+          .filter((r) => r.alive)
+          .map((r) => {
+            let best = r.snake[0];
+            for (const c of r.snake) if (manhattan(c, h) < manhattan(best, h)) best = c;
+            return { r, c: best, dist: manhattan(best, h) };
+          })
+          .filter((o) => o.dist <= reach)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, strong ? 5 : 3);
+        for (const o of near) {
+          hit.push(o.r);
+          targets.push({ ...o.c });
+        }
+      }
+      for (const c of cells) {
+        const r = this.rivalAt(c.x, c.y);
+        if (r && !hit.includes(r)) hit.push(r);
+      }
+    }
+
+    this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets, strong });
+    if (smashed.length) {
+      const points = smashed.length * SMASH_POINTS;
+      this.score += points;
+      this.smashed += smashed.length;
+      this.events.push({ type: 'smash', cells: smashed, points });
+    }
+
+    for (const r of hit) {
+      if (ab.burnMs) r.burnMs = Math.max(r.burnMs, ab.burnMs);
+      if (ab.poisonMs) r.poisonMs = Math.max(r.poisonMs, ab.poisonMs);
+      if (ab.freezeMs) r.frozenMs = Math.max(r.frozenMs, ab.freezeMs);
+      if (ab.stunMs) r.stunMs = Math.max(r.stunMs, ab.stunMs);
+      if (ab.confuseMs) r.confuseMs = Math.max(r.confuseMs, ab.confuseMs);
+      if (ab.fearMs) r.fearMs = Math.max(r.fearMs, ab.fearMs);
+      if (ab.push) this.pushRival(r, d, ab.push);
+      const taken = this.damageRival(r, ab.damage + (strong ? 1 : 0), ab.bonusPerHit ?? 0);
+      if (ab.steal) this.pendingGrow += Math.min(taken, ab.damage + 1);
+    }
+    if (ab.stunAllMs && this.mode.rivals === 'lethal') {
+      for (const r of this.rivals) if (r.alive && chebyshev(r.snake[0], h) <= this.viewRadius * 2) r.stunMs = Math.max(r.stunMs, ab.stunAllMs);
+    }
+    if (ab.invisibleMs) this.invisibleMs = Math.max(this.invisibleMs, ab.invisibleMs);
+    if (ab.hazard && ab.hazardMs) {
+      for (const c of cells) {
+        if (this.isBlocked(c.x, c.y)) continue;
+        this.hazards.set(cellKey(c.x, c.y), { x: c.x, y: c.y, kind: ab.hazard, untilMs: this.timeMs + ab.hazardMs });
+      }
+    }
+    if (ab.pullFood) {
+      // Everyday food nearby is sucked into the black hole.
+      const cx = h.x + d.x * ab.range;
+      const cy = h.y + d.y * ab.range;
+      for (const f of this.foods) {
+        if (!isBasic(f.type) || chebyshev(f.pos, { x: cx, y: cy }) > 10) continue;
+        const spot = randomCellNear({ x: cx, y: cy }, 0, 1, this.rng, (x, y) => this.isFree(x, y));
+        if (spot) f.pos = spot;
+      }
+    }
   }
 
   private updateRivals(dt: number): void {
     if (this.status !== 'playing') return;
     const step = this.rivalStepMs;
     this.rivals.forEach((r, i) => {
-      if (this.status !== 'playing') return;
+      if (this.status !== 'playing' || r.dead) return;
       if (!r.alive) {
+        // Not placed yet (no free spot): keep trying.
         r.respawnMs -= dt;
-        if (r.respawnMs <= 0) this.placeRival(r, i + this.rivalsKilled);
+        if (r.respawnMs <= 0) this.placeRival(r, i);
         return;
       }
       if (chebyshev(r.snake[0], this.head) > this.viewRadius * 4) {
         this.placeRival(r, i);
         return;
       }
+      for (const key of ['burnMs', 'poisonMs', 'frozenMs', 'stunMs', 'confuseMs', 'fearMs'] as const) if (r[key] > 0) r[key] = Math.max(0, r[key] - dt);
+      if (r.burnMs > 0 || r.poisonMs > 0) {
+        r.dotMs += dt;
+        if (r.dotMs >= 1000) {
+          r.dotMs -= 1000;
+          this.damageRival(r, 1);
+          if (!r.alive) return;
+        }
+      } else r.dotMs = 0;
+      if (r.frozenMs > 0 || r.stunMs > 0) return;
       r.moveTimer += dt;
       if (r.moveTimer >= step) {
         r.moveTimer -= step;
@@ -579,6 +871,25 @@ export class Game {
         this.stepRival(r);
       }
     });
+    this.updateWaves(dt);
+  }
+
+  /** Dead rivals stay dead; once all are gone a new, stronger wave comes after a short pause. */
+  private updateWaves(dt: number): void {
+    if (this.rivals.length === 0 || !this.rivals.every((r) => r.dead)) return;
+    if (this.waveTimerMs === 0) {
+      this.waveTimerMs = WAVE_DELAY_MS;
+      if (this.mode.rivals === 'lethal') this.events.push({ type: 'waveCleared', wave: this.wave });
+      return;
+    }
+    this.waveTimerMs -= dt;
+    if (this.waveTimerMs > 0) return;
+    this.waveTimerMs = 0;
+    this.wave++;
+    const count = Math.min(MAX_RIVALS, this.diff.rivals + this.wave - 1);
+    this.rivals = [];
+    for (let i = 0; i < count; i++) this.rivals.push(this.newRival(i));
+    if (this.mode.rivals === 'lethal') this.events.push({ type: 'wave', wave: this.wave });
   }
 
   /** Can rival `r` move into (x, y)? */
@@ -619,8 +930,13 @@ export class Game {
 
   private chooseRivalDir(r: Rival): Dir {
     const head = r.snake[0];
-    const lethal = this.mode.rivals === 'lethal' && this.effects.ghost <= 0;
-    const bigger = r.snake.length > this.snake.length;
+    const lethal = this.mode.rivals === 'lethal' && this.effects.ghost <= 0 && this.invisibleMs <= 0;
+    // Scared rivals act small (they run away instead of hunting).
+    const bigger = r.snake.length > this.snake.length && r.fearMs <= 0;
+    if (r.confuseMs > 0) {
+      const options = ([0, 1, 2, 3] as Dir[]).filter((d) => !isOpposite(d, r.dir) && this.rivalCanEnter(r, head.x + DIRS[d].x, head.y + DIRS[d].y, false));
+      if (options.length) return this.rng.pick(options);
+    }
     // Target: nearest everyday food the rival is clearly closer to (so rivals
     // don't keep stealing the player's food), or the player when hunting.
     let target: Vec | null = null;
@@ -647,7 +963,7 @@ export class Game {
       let score = this.rng.next() * 0.6;
       if (target) score -= manhattan({ x: nx, y: ny }, target);
       else score += d === r.dir ? 1 : 0;
-      if (lethal && !bigger && playerDist < 6) score += manhattan({ x: nx, y: ny }, this.head) * 1.5;
+      if (lethal && !bigger && playerDist < (r.fearMs > 0 ? 12 : 6)) score += manhattan({ x: nx, y: ny }, this.head) * 1.5;
       if (this.rivalSpace(r, nx, ny, bigger, 30) < Math.min(30, r.snake.length + 2)) score -= 60;
       if (score > bestScore) {
         bestScore = score;
@@ -683,6 +999,10 @@ export class Game {
     else {
       const t = r.snake.pop()!;
       subCount(r.cells, cellKey(t.x, t.y));
+    }
+    if (this.hazards.has(cellKey(nx, ny)) && this.mode.rivals === 'lethal') {
+      this.damageRival(r, 1);
+      if (!r.alive) return;
     }
     const food = this.foodAt(nx, ny);
     if (food && isBasic(food.type) && this.rivalsCanEat) {

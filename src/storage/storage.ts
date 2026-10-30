@@ -4,7 +4,7 @@ import type { DifficultyId } from '../config/difficulty';
 import type { BoardSize } from '../core/grid';
 import type { Lang } from '../config/i18n';
 import type { ModeId } from '../config/modes';
-import type { SkinId } from '../config/skins';
+import { isSkinId, type SkinId } from '../config/skins';
 
 export interface Settings {
   /** 0..1 */
@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.8,
   muted: false,
   haptics: true,
-  skin: 'classic',
+  skin: 'dragon',
   lang: 'ar',
   dpad: false,
   dpadSide: 'right',
@@ -81,6 +81,8 @@ export function loadSettings(kv: KV | null = defaultKV()): Settings {
     if (v !== undefined && typeof v === typeof DEFAULT_SETTINGS[k]) (s as unknown as Record<string, unknown>)[k] = v;
   }
   s.volume = Math.min(1, Math.max(0, Number(s.volume) || 0));
+  // Skins that no longer exist fall back to the red dragon.
+  if (!isSkinId(s.skin)) s.skin = DEFAULT_SETTINGS.skin;
   return s;
 }
 

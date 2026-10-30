@@ -131,6 +131,17 @@ export class ObstacleWorld {
     }
   }
 
+  /** Breaks one obstacle cell (dragon breath). Returns whether there was one. */
+  remove(x: number, y: number): boolean {
+    if (!this.blocked.delete(cellKey(x, y))) return false;
+    const cells = this.chunks.get(chunkKey(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
+    const i = cells ? cells.findIndex((c) => c.x === x && c.y === y) : -1;
+    if (cells && i >= 0) cells.splice(i, 1);
+    this.dirty = true;
+    this.version++;
+    return true;
+  }
+
   /** Drops everything (zone change); call update() afterwards to rebuild. */
   clear(): void {
     this.blocked.clear();

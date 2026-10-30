@@ -20,6 +20,8 @@ import { Items3D } from './items';
 import { Overlay, type RivalTag, type ScreenPoint } from './overlay';
 import { Particles3D } from './particles';
 import { Snake3D } from './snake';
+import { Hazards3D } from './hazards';
+import type { Rival } from '../core/state';
 import { SceneryLayer } from './scenery';
 import { Ambient3D, DecorLayer, Ground, Movers3D, ObstacleLayer } from './world';
 
@@ -77,6 +79,7 @@ export class Renderer3D {
   private readonly rivalViews = new Map<number, Snake3D>();
   private readonly items = new Items3D();
   private readonly movers = new Movers3D();
+  private readonly hazards = new Hazards3D();
   private readonly particles = new Particles3D(3000);
   private readonly overlay: Overlay;
   private cur: ZoneLayers | null = null;
@@ -94,7 +97,7 @@ export class Renderer3D {
     this.scene.background = new Color('#000');
     this.sun.position.set(-5, 12, 7);
     this.scene.add(this.hemi, this.sun, this.sun.target);
-    this.scene.add(this.snake.group, this.items.group, this.movers.group, this.particles.group);
+    this.scene.add(this.snake.group, this.items.group, this.movers.group, this.hazards.group, this.particles.group);
     this.overlay = new Overlay(overlayRoot);
   }
 
@@ -210,7 +213,8 @@ export class Renderer3D {
       skin: view.skin,
       headScale: fx.headScale,
       bulges: fx.bulges(game, alpha),
-      ghost: game.effects.ghost > 0,
+      // Ghost power-up or hidden by the shadow breath.
+      ghost: game.effects.ghost > 0 || game.invisibleMs > 0,
       glow: glowEffect ? EFFECT_COLORS[glowEffect] : null,
       visible: showSnake,
     });
@@ -268,6 +272,7 @@ export class Renderer3D {
 
     this.items.update(game, alpha, view.timeMs, hx, hz, showSnake, cur.zone.light.hemi < 1.2);
     this.movers.update(cur.zone, game.movers, alpha, view.timeMs);
+    this.hazards.update(game, view.timeMs);
     const pixelScale = this.renderer.getDrawingBufferSize(v2).y / (2 * Math.tan((FOV * Math.PI) / 360));
     this.particles.update(fx.particles, pixelScale);
 
@@ -309,15 +314,21 @@ export class Renderer3D {
         headScale: 1,
         bulges: [],
         ghost: !lethal,
-        glow: null,
+        glow: rivalGlow(r, view.timeMs),
         visible: true,
       });
+      if (r.burnMs > 0 && Math.random() < view.dtMs / 45) {
+        // Flames licking off a burning rival.
+        const i = Math.floor(Math.random() * v.count);
+        view.fx.particles.emit(v.xs[i], 0.6, v.zs[i], (Math.random() - 0.5) * 0.8, 2 + Math.random() * 1.5, (Math.random() - 0.5) * 0.8, 450, 0.24, Math.random() < 0.5 ? '#ff6a00' : '#ffd23f', { glow: true });
+      }
       // Only label rivals near the view (labels far off screen are noise).
       const x = v.xs[0];
       const z = v.zs[0];
       if (playing && Math.abs(x - hx) + Math.abs(z - hz) < 30) {
-        const kind = !lethal ? 'calm' : r.snake.length <= game.snake.length ? 'prey' : 'threat';
-        tags.push({ at: this.project(x, 1.15, z), text: `${kind === 'threat' ? '⚠ ' : ''}${r.snake.length}`, kind });
+        const kind = !lethal ? 'calm' : r.snake.length <= game.snake.length || r.frozenMs > 0 ? 'prey' : 'threat';
+        const icon = r.frozenMs > 0 ? '❄️ ' : r.burnMs > 0 ? '🔥 ' : kind === 'threat' ? '⚠ ' : '';
+        tags.push({ at: this.project(x, 1.15, z), text: `${icon}${r.snake.length}`, kind });
       }
     }
     for (const [id, v] of this.rivalViews) {
@@ -359,4 +370,15 @@ function lerpColor(out: Color, a: string, b: string, t: number): void {
 
 function easeOut(t: number): number {
   return 1 - (1 - t) * (1 - t);
+}
+
+/** Glow color showing a rival's breath status (frozen, burning, poisoned...). */
+function rivalGlow(r: Rival, timeMs: number): string | null {
+  if (r.frozenMs > 0) return '#9fdcff';
+  if (r.burnMs > 0) return '#ff6a00';
+  if (r.poisonMs > 0) return '#7dff3b';
+  if (r.stunMs > 0) return '#ffe066';
+  if (r.confuseMs > 0) return `hsl(${Math.floor(timeMs / 4) % 360},90%,60%)`;
+  if (r.fearMs > 0) return '#ffffff';
+  return null;
 }

@@ -120,6 +120,21 @@ export class Fx {
     p.burst(at.x, 0.5, at.y, '#ffffff', 28, 8, 0.16, 500, { glow: true, drag: 0.05 });
   }
 
+  /** A rival snake breaks apart; `points` > 0 when the player ate it. */
+  onRivalKilled(cells: Vec[], colors: string[], points: number): void {
+    const p = this.particles;
+    cells.forEach((c, i) => {
+      p.emit(c.x, 0.4, c.y, (Math.random() - 0.5) * 5, 3 + Math.random() * 4, (Math.random() - 0.5) * 5, 1000 + Math.random() * 500, i === 0 ? 0.7 : 0.5, colors[i], { gravity: 16, drag: 0.5, bounce: true });
+    });
+    if (points > 0 && cells.length) {
+      const h = cells[0];
+      p.burst(h.x, 0.6, h.y, '#ffd23f', 30, 6, 0.16, 700, { glow: true, drag: 0.1 });
+      this.popup(h.x, 1.2, h.y, `+${points}`, '#7dff6b', 32);
+      this.headPop = 1;
+      this.addShake(0.3);
+    }
+  }
+
   addShake(amount: number): void {
     this.trauma = Math.min(1, this.trauma + amount);
   }

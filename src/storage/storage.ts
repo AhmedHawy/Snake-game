@@ -19,6 +19,8 @@ export interface Settings {
   difficulty: DifficultyId;
   /** Zoom: how big cells look on screen. */
   boardSize: BoardSize;
+  /** -1 = journey through all worlds, otherwise the index of the only world to play in. */
+  world: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: 'classic',
   difficulty: 'normal',
   boardSize: 'large',
+  world: -1,
 };
 
 const SETTINGS_KEY = 'snakerush.settings.v1';
@@ -102,6 +105,21 @@ export function submitScore(mode: ModeId, diff: DifficultyId, score: number, kv:
   scores[key] = score;
   writeJson(kv, SCORES_KEY, scores);
   return true;
+}
+
+const PROGRESS_KEY = 'snakerush.progress.v1';
+
+/** Points collected over all runs (unlocks skins). */
+export function totalPoints(kv: KV | null = defaultKV()): number {
+  const v = readJson<{ total: number }>(kv, PROGRESS_KEY)?.total;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** Adds a run's score to the total; returns the new total. */
+export function addPoints(points: number, kv: KV | null = defaultKV()): number {
+  const total = totalPoints(kv) + Math.max(0, Math.round(points));
+  writeJson(kv, PROGRESS_KEY, { total });
+  return total;
 }
 
 export function bestScore(mode: ModeId, diff: DifficultyId, kv: KV | null = defaultKV()): number {

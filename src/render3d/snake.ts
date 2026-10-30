@@ -1,6 +1,7 @@
 // 3D snake: shiny instanced spheres along the interpolated body (with extra
 // in-between spheres for a smooth tube), a head with eyes that look where the
-// snake goes, a tongue flick, blob shadows, and dragon horns + back spines.
+// snake goes, a tongue flick, blob shadows, and dragon horns, whiskers, back
+// spines and side scales. Used for the player and for rival snakes.
 import {
   CanvasTexture,
   Color,
@@ -15,11 +16,24 @@ import {
   PlaneGeometry,
   SphereGeometry,
   BoxGeometry,
+  CatmullRomCurve3,
+  CylinderGeometry,
+  Euler,
+  Quaternion,
+  TubeGeometry,
+  Vector3,
   type Material,
 } from 'three';
 import type { SkinConfig } from '../config/skins';
-import type { Game } from '../core/state';
-import { DIRS } from '../core/types';
+import { DIRS, type Dir, type Vec } from '../core/types';
+
+/** Anything drawn as a snake: the player or a rival. */
+export interface SnakeBody {
+  snake: Vec[];
+  prevSnake: Vec[];
+  dir: Dir;
+  status: string;
+}
 
 const colorCache = new Map<string, Color>();
 export function cssColor(css: string): Color {
@@ -61,6 +75,10 @@ export interface SnakeDrawOptions {
 
 const BODY_RADIUS = 0.4;
 const m4 = new Matrix4();
+const q = new Quaternion();
+const eul = new Euler();
+const pos = new Vector3();
+const scl = new Vector3();
 
 export class Snake3D {
   readonly group = new Group();
@@ -75,17 +93,23 @@ export class Snake3D {
   private body: InstancedMesh;
   private shadows: InstancedMesh;
   private spines: InstancedMesh;
+  private scales: InstancedMesh;
   private readonly bodyMat = new MeshStandardMaterial({ roughness: 0.32, metalness: 0.08 });
   private readonly headMat = new MeshStandardMaterial({ roughness: 0.3, metalness: 0.08 });
   private readonly eyeMat = new MeshStandardMaterial({ roughness: 0.2 });
   private readonly pupilMat = new MeshStandardMaterial({ roughness: 0.2, color: '#111' });
   private readonly hornMat = new MeshStandardMaterial({ roughness: 0.5 });
   private readonly spineMat = new MeshStandardMaterial({ roughness: 0.4 });
+  private readonly scaleMat = new MeshStandardMaterial({ roughness: 0.35, metalness: 0.3 });
+  private readonly whiskerMat = new MeshStandardMaterial({ roughness: 0.5 });
   private readonly shadowMat = new MeshBasicMaterial({ map: blobShadowTexture(), transparent: true, depthWrite: false });
   private readonly head = new Group();
   private readonly headBall: Mesh;
   private readonly tongue = new Group();
   private readonly horns = new Group();
+  private readonly hornMeshes: Mesh[] = [];
+  private readonly frills: Mesh[] = [];
+  private readonly whiskers: Group[] = [];
   private readonly blinkers: Mesh[] = [];
   private readonly sphere = new SphereGeometry(0.5, 12, 9);
 
@@ -93,6 +117,7 @@ export class Snake3D {
     this.body = this.makeBody(512);
     this.shadows = this.makeShadows(256);
     this.spines = this.makeSpines(256);
+    this.scales = this.makeScales(512);
 
     this.headBall = new Mesh(this.sphere, this.headMat);
     this.headBall.scale.set(1, 0.86, 1.12);
@@ -135,6 +160,21 @@ export class Snake3D {
       const nostril = new Mesh(new SphereGeometry(0.04, 6, 4), this.pupilMat);
       nostril.position.set(s * 0.1, 0.12, 0.56);
       this.horns.add(horn, frill, nostril);
+      this.hornMeshes.push(horn);
+      this.frills.push(frill);
+      // Long, curling whiskers from the snout (they sway as the dragon moves).
+      const curve = new CatmullRomCurve3([
+        new Vector3(0, 0, 0),
+        new Vector3(s * 0.35, -0.05, -0.05),
+        new Vector3(s * 0.7, -0.2, -0.35),
+        new Vector3(s * 0.85, -0.1, -0.75),
+        new Vector3(s * 0.75, 0.05, -1.0),
+      ]);
+      const whisker = new Group();
+      whisker.add(new Mesh(new TubeGeometry(curve, 20, 0.028, 5), this.whiskerMat));
+      whisker.position.set(s * 0.16, 0.06, 0.5);
+      this.whiskers.push(whisker);
+      this.horns.add(whisker);
     }
     this.head.add(this.horns);
     this.group.add(this.head);
@@ -171,6 +211,16 @@ export class Snake3D {
     return m;
   }
 
+  private makeScales(cap: number): InstancedMesh {
+    // Hexagonal plates lying along the flanks.
+    const m = new InstancedMesh(new CylinderGeometry(0.5, 0.5, 0.18, 6).rotateZ(Math.PI / 2), this.scaleMat, cap);
+    m.instanceMatrix.setUsage(DynamicDrawUsage);
+    m.frustumCulled = false;
+    m.count = 0;
+    this.group.add(m);
+    return m;
+  }
+
   private ensure(n: number): void {
     if (this.xs.length < n) {
       const size = Math.max(n, this.xs.length * 2);
@@ -189,11 +239,14 @@ export class Snake3D {
       this.group.remove(this.spines);
       this.spines.dispose();
       this.spines = this.makeSpines(n * 2);
+      this.group.remove(this.scales);
+      this.scales.dispose();
+      this.scales = this.makeScales(n * 4);
     }
   }
 
   /** Interpolated segment centers in world space. */
-  computePoints(game: Game, alpha: number): number {
+  computePoints(game: SnakeBody, alpha: number): number {
     const n = game.snake.length;
     this.ensure(n);
     for (let i = 0; i < n; i++) {
@@ -212,7 +265,7 @@ export class Snake3D {
     return n;
   }
 
-  update(game: Game, o: SnakeDrawOptions): void {
+  update(game: SnakeBody, o: SnakeDrawOptions): void {
     this.group.visible = o.visible;
     const n = this.computePoints(game, o.alpha);
     if (!o.visible || n === 0) return;
@@ -220,7 +273,7 @@ export class Snake3D {
 
     // Materials: ghost transparency, power-up / skin glow.
     const opacity = o.ghost ? 0.45 + 0.12 * Math.sin(o.timeMs / 120) : 1;
-    for (const mat of [this.bodyMat, this.headMat, this.hornMat, this.spineMat] as MeshStandardMaterial[]) {
+    for (const mat of [this.bodyMat, this.headMat, this.hornMat, this.spineMat, this.scaleMat, this.whiskerMat] as MeshStandardMaterial[]) {
       setOpacity(mat, opacity);
       if (o.glow) {
         mat.emissive.set(o.glow);
@@ -252,8 +305,13 @@ export class Snake3D {
     let k = 0;
     let s = 0;
     let sp = 0;
+    let sc = 0;
     const dragon = skin.dragon;
-    if (dragon) this.spineMat.color.set(dragon.spine);
+    if (dragon) {
+      this.spineMat.color.set(dragon.spine);
+      if (dragon.scales) this.scaleMat.color.set(dragon.scales);
+    }
+    const withScales = !!dragon?.scales;
     for (let i = n - 1; i >= 1; i--) {
       const r0 = radius(i);
       const r1 = radius(i - 1);
@@ -281,9 +339,23 @@ export class Snake3D {
         m4.setPosition(x0, r0 * 2.2, z0);
         this.spines.setMatrixAt(sp++, m4);
       }
+      if (withScales && near && i < n - 1) {
+        // Two plates per segment, tilted outwards on each flank.
+        const yaw = Math.atan2(x1 - x0, z1 - z0);
+        const px = Math.cos(yaw);
+        const pz = -Math.sin(yaw);
+        for (const side of [-1, 1]) {
+          eul.set(0, yaw, side * 0.8, 'YXZ');
+          q.setFromEuler(eul);
+          pos.set(x0 + px * side * r0 * 0.88, r0 * 1.35, z0 + pz * side * r0 * 0.88);
+          scl.setScalar(r0 * 0.95);
+          m4.compose(pos, q, scl);
+          this.scales.setMatrixAt(sc++, m4);
+        }
+      }
     }
     // Shadow under the head.
-    const hr = BODY_RADIUS * 1.3 * o.headScale;
+    const hr = BODY_RADIUS * 1.3 * o.headScale * (dragon?.headSize ?? 1);
     m4.makeScale(hr * 2.8, 1, hr * 2.8);
     m4.setPosition(this.xs[0], 0.012, this.zs[0]);
     this.shadows.setMatrixAt(s++, m4);
@@ -291,6 +363,9 @@ export class Snake3D {
     this.body.count = k;
     this.shadows.count = s;
     this.spines.count = sp;
+    this.scales.count = sc;
+    this.scales.instanceMatrix.needsUpdate = true;
+    this.scales.visible = withScales;
     this.body.instanceMatrix.needsUpdate = true;
     if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
     this.shadows.instanceMatrix.needsUpdate = true;
@@ -328,7 +403,17 @@ export class Snake3D {
     for (const b of this.blinkers) b.scale.y = blink ? 0.15 : 1;
 
     this.horns.visible = !!dragon;
-    if (dragon) this.hornMat.color.set(dragon.horn);
+    if (dragon) {
+      this.hornMat.color.set(dragon.horn);
+      for (const h of this.hornMeshes) h.scale.setScalar(dragon.hornSize ?? 1);
+      for (const f of this.frills) f.visible = dragon.frills !== false;
+      this.whiskers.forEach((w, side) => {
+        w.visible = !!dragon.whiskers;
+        w.rotation.y = (side === 0 ? 1 : -1) * 0.18 * Math.sin(o.timeMs / 260 + side);
+        w.rotation.x = 0.12 * Math.sin(o.timeMs / 330);
+      });
+      if (dragon.whiskers) this.whiskerMat.color.set(dragon.whiskers);
+    }
   }
 }
 

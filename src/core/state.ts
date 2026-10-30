@@ -22,6 +22,7 @@ import { MODES, PORTAL_COLORS, type ModeConfig } from '../config/modes';
 import { FOODS_PER_ZONE, ZONES, type ZoneConfig } from '../config/zones';
 import { Rng } from './rng';
 import { CHUNK, ObstacleWorld, cellKey, randomCellNear } from './spawn';
+import type { SkinId } from '../config/skins';
 import { DIRS, chebyshev, isOpposite, manhattan, type Dir, type Vec } from './types';
 
 export interface FoodItem {
@@ -61,7 +62,33 @@ export type GameEvent =
   | { type: 'timeUp' }
   | { type: 'portal'; from: Vec; to: Vec }
   | { type: 'expire'; food: FoodItem }
-  | { type: 'spawn'; food: FoodItem };
+  | { type: 'spawn'; food: FoodItem }
+  | { type: 'rivalKilled'; rival: Rival; cells: Vec[]; byPlayer: boolean; points: number };
+
+/** A computer-controlled rival snake. */
+export interface Rival {
+  id: number;
+  snake: Vec[];
+  prevSnake: Vec[];
+  dir: Dir;
+  pendingGrow: number;
+  moveTimer: number;
+  skin: SkinId;
+  alive: boolean;
+  /** Time until a dead rival comes back (ms). */
+  respawnMs: number;
+  /** Cell occupancy counts (fast collision checks). */
+  cells: Map<number, number>;
+  /** Always 'playing' (lets the renderer treat it like the player). */
+  status: 'playing';
+}
+
+/** Skins rivals pick from (the player's own skin is skipped). */
+const RIVAL_SKINS: SkinId[] = ['tiger', 'candy', 'ocean', 'rainbow', 'neon', 'classic'];
+/** Rival lengths relative to the player: some are prey, some are threats. */
+const RIVAL_LENGTH_OFFSETS = [-3, 4, -1, 7, -4];
+const RIVAL_POINTS_PER_SEGMENT = 5;
+const RIVAL_RESPAWN_MS = 2500;
 
 export interface GameOptions {
   mode: ModeConfig;
@@ -71,6 +98,8 @@ export interface GameOptions {
   startLength?: number;
   /** Roughly half the number of cells visible on screen (spawn distances scale with it). */
   viewRadius?: number;
+  /** The player's skin (rivals pick different ones). */
+  playerSkin?: SkinId;
 }
 
 export const TIMED_EFFECTS: TimedEffect[] = ['speed', 'slow', 'ghost', 'magnet'];
@@ -127,6 +156,10 @@ export class Game {
   stepCount = 0;
   moveTimer = 0;
   crashAt: Vec | null = null;
+  rivals: Rival[] = [];
+  rivalsKilled = 0;
+  /** Player skin (rivals avoid wearing the same one). */
+  playerSkin: SkinId = 'classic';
   events: GameEvent[] = [];
   private nextId = 1;
   private snakeCells = new Map<number, number>();
@@ -145,9 +178,11 @@ export class Game {
     this.prevSnake = this.snake.map((p) => ({ ...p }));
     this.indexSnake();
 
+    this.playerSkin = opts.playerSkin ?? 'classic';
     this.placePortals();
     this.refreshWorld();
     this.ensureApple();
+    if (this.mode.rivals !== 'none') for (let i = 0; i < this.diff.rivals; i++) this.rivals.push(this.newRival(i));
     this.events.length = 0;
   }
 
@@ -159,10 +194,20 @@ export class Game {
     return this.snake[0];
   }
 
+  /** Milliseconds per cell without power-ups. */
+  get baseStepMs(): number {
+    const base = Math.max(this.diff.minStepMs, this.diff.baseStepMs - this.diff.rampMsPerFood * this.foodsEaten);
+    return base * Math.pow(this.diff.loopSpeedFactor, this.loop);
+  }
+
+  /** Rivals move a little slower than the player's base speed. */
+  get rivalStepMs(): number {
+    return this.baseStepMs * 1.15;
+  }
+
   /** Milliseconds per cell right now. */
   get stepMs(): number {
-    const base = Math.max(this.diff.minStepMs, this.diff.baseStepMs - this.diff.rampMsPerFood * this.foodsEaten);
-    let ms = base * Math.pow(this.diff.loopSpeedFactor, this.loop);
+    let ms = this.baseStepMs;
     if (this.effects.speed > 0) ms *= SPEED_BOOST_FACTOR;
     if (this.effects.slow > 0) ms *= SLOW_MO_FACTOR;
     return Math.max(ABSOLUTE_MIN_STEP_MS, ms);
@@ -236,6 +281,7 @@ export class Game {
       if (this.moveTimer > step) this.moveTimer = 0;
       this.step();
     }
+    this.updateRivals(dt);
   }
 
   /** Called by the app once the crash animation finishes. */
@@ -267,6 +313,13 @@ export class Game {
 
     // Ghost lets the snake pass through obstacles and its own body.
     if (this.effects.ghost <= 0 && (this.isBlocked(nx, ny) || this.moverAt(nx, ny))) return this.crash({ x: nx, y: ny });
+
+    // Rivals: the longer snake wins (ties go to the player); ghost passes through.
+    const rival = this.mode.rivals === 'lethal' && this.effects.ghost <= 0 ? this.rivalAt(nx, ny) : undefined;
+    if (rival) {
+      if (this.snake.length >= rival.snake.length) this.killRival(rival, true);
+      else return this.crash({ x: nx, y: ny });
+    }
 
     if (this.effects.ghost <= 0 && !this.mode.noDeath) {
       // The tail cell frees up this step unless the snake is growing.
@@ -405,6 +458,7 @@ export class Game {
     for (const p of this.portals) if (chebyshev(p.a, { x, y }) <= 1 || chebyshev(p.b, { x, y }) <= 1) return true;
     for (const f of this.foods) if (f.pos.x === x && f.pos.y === y) return true;
     for (const m of this.movers) if (m.pos.x === x && m.pos.y === y) return true;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (this.rivalAt(x + dx, y + dy)) return true;
     return false;
   };
 
@@ -421,6 +475,212 @@ export class Game {
       const c = randomCellNear(h, this.viewRadius + 1, this.viewRadius * 2, this.rng, (x, y) => !this.forbidden(x, y) && !this.isBlocked(x, y));
       if (!c) break;
       this.movers.push({ id: this.nextId++, pos: c, prev: { ...c }, dir: this.rng.int(4) as Dir });
+    }
+  }
+
+  // --------------------------------------------------------------- rivals
+
+  rivalAt(x: number, y: number): Rival | undefined {
+    const k = cellKey(x, y);
+    for (const r of this.rivals) if (r.alive && r.cells.has(k)) return r;
+    return undefined;
+  }
+
+  private newRival(index: number): Rival {
+    const skins = RIVAL_SKINS.filter((s) => s !== this.playerSkin);
+    const r: Rival = {
+      id: this.nextId++,
+      snake: [],
+      prevSnake: [],
+      dir: 0,
+      pendingGrow: 0,
+      moveTimer: this.rng.next() * 100,
+      skin: skins[index % skins.length],
+      alive: false,
+      respawnMs: 0,
+      cells: new Map(),
+      status: 'playing',
+    };
+    this.placeRival(r, index);
+    return r;
+  }
+
+  /** Puts a rival somewhere near (but not too near) the player, in a straight free line. */
+  private placeRival(r: Rival, index: number): boolean {
+    const offset = RIVAL_LENGTH_OFFSETS[index % RIVAL_LENGTH_OFFSETS.length] + this.rng.int(3) - 1;
+    const len = Math.max(3, Math.min(60, this.snake.length + offset));
+    const near = this.viewRadius + 4;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const head = randomCellNear(this.head, near, near + 8, this.rng, (x, y) => this.isFree(x, y));
+      if (!head) continue;
+      const dir = this.rng.int(4) as Dir;
+      const back = DIRS[(dir + 2) % 4];
+      const body: Vec[] = [];
+      let ok = true;
+      for (let i = 0; i < len && ok; i++) {
+        const c = { x: head.x + back.x * i, y: head.y + back.y * i };
+        ok = this.isFree(c.x, c.y) && chebyshev(c, this.head) > 4;
+        body.push(c);
+      }
+      if (!ok) continue;
+      r.snake = body;
+      r.prevSnake = body.map((c) => ({ ...c }));
+      r.dir = dir;
+      r.pendingGrow = 0;
+      r.cells.clear();
+      for (const c of body) addCount(r.cells, cellKey(c.x, c.y));
+      r.alive = true;
+      return true;
+    }
+    r.alive = false;
+    r.respawnMs = 500;
+    return false;
+  }
+
+  private killRival(r: Rival, byPlayer: boolean): void {
+    const points = byPlayer ? r.snake.length * RIVAL_POINTS_PER_SEGMENT : 0;
+    if (byPlayer) {
+      this.score += points;
+      this.pendingGrow += 2;
+      this.rivalsKilled++;
+    }
+    this.events.push({ type: 'rivalKilled', rival: r, cells: r.snake.map((c) => ({ ...c })), byPlayer, points });
+    r.alive = false;
+    r.respawnMs = RIVAL_RESPAWN_MS;
+    r.cells.clear();
+  }
+
+  private updateRivals(dt: number): void {
+    if (this.status !== 'playing') return;
+    const step = this.rivalStepMs;
+    this.rivals.forEach((r, i) => {
+      if (this.status !== 'playing') return;
+      if (!r.alive) {
+        r.respawnMs -= dt;
+        if (r.respawnMs <= 0) this.placeRival(r, i + this.rivalsKilled);
+        return;
+      }
+      if (chebyshev(r.snake[0], this.head) > this.viewRadius * 4) {
+        this.placeRival(r, i);
+        return;
+      }
+      r.moveTimer += dt;
+      if (r.moveTimer >= step) {
+        r.moveTimer -= step;
+        if (r.moveTimer > step) r.moveTimer = 0;
+        this.stepRival(r);
+      }
+    });
+  }
+
+  /** Can rival `r` move into (x, y)? */
+  private rivalCanEnter(r: Rival, x: number, y: number, bigger: boolean): boolean {
+    if (this.isBlocked(x, y) || this.moverAt(x, y) || this.isPortal(x, y)) return false;
+    const k = cellKey(x, y);
+    for (const o of this.rivals) {
+      if (!o.alive || !o.cells.has(k)) continue;
+      // Its own tail moves away this step unless it is growing.
+      const tail = o.snake[o.snake.length - 1];
+      if (o === r && r.pendingGrow === 0 && tail.x === x && tail.y === y && r.cells.get(k) === 1) continue;
+      return false;
+    }
+    if (this.snakeCells.has(k)) {
+      if (this.mode.rivals !== 'lethal' || this.effects.ghost > 0) return true;
+      return bigger;
+    }
+    return true;
+  }
+
+  /** Free cells reachable from (x, y), up to `limit` (avoids dead ends). */
+  private rivalSpace(r: Rival, x: number, y: number, bigger: boolean, limit: number): number {
+    const seen = new Set<number>([cellKey(x, y)]);
+    const queue: Vec[] = [{ x, y }];
+    while (queue.length && seen.size < limit) {
+      const c = queue.shift()!;
+      for (const d of DIRS) {
+        const nx = c.x + d.x;
+        const ny = c.y + d.y;
+        const k = cellKey(nx, ny);
+        if (seen.has(k) || !this.rivalCanEnter(r, nx, ny, bigger)) continue;
+        seen.add(k);
+        queue.push({ x: nx, y: ny });
+      }
+    }
+    return seen.size;
+  }
+
+  private chooseRivalDir(r: Rival): Dir {
+    const head = r.snake[0];
+    const lethal = this.mode.rivals === 'lethal' && this.effects.ghost <= 0;
+    const bigger = r.snake.length > this.snake.length;
+    // Target: nearest everyday food the rival is clearly closer to (so rivals
+    // don't keep stealing the player's food), or the player when hunting.
+    let target: Vec | null = null;
+    let best = Infinity;
+    for (const f of this.foods) {
+      if (!isBasic(f.type)) continue;
+      const d = manhattan(f.pos, head);
+      if (d < best && d < 20 && d + 3 < manhattan(f.pos, this.head)) {
+        best = d;
+        target = f.pos;
+      }
+    }
+    const playerDist = manhattan(head, this.head);
+    if (lethal && bigger && playerDist < 10 && this.rng.chance(this.diff.rivalAggression)) {
+      const pd = DIRS[this.dir];
+      target = { x: this.head.x + pd.x * 2, y: this.head.y + pd.y * 2 };
+    }
+    let bestScore = -Infinity;
+    let bestDir = r.dir;
+    for (const d of [r.dir, ((r.dir + 1) % 4) as Dir, ((r.dir + 3) % 4) as Dir]) {
+      const nx = head.x + DIRS[d].x;
+      const ny = head.y + DIRS[d].y;
+      if (!this.rivalCanEnter(r, nx, ny, bigger)) continue;
+      let score = this.rng.next() * 0.6;
+      if (target) score -= manhattan({ x: nx, y: ny }, target);
+      else score += d === r.dir ? 1 : 0;
+      if (lethal && !bigger && playerDist < 6) score += manhattan({ x: nx, y: ny }, this.head) * 1.5;
+      if (this.rivalSpace(r, nx, ny, bigger, 30) < Math.min(30, r.snake.length + 2)) score -= 60;
+      if (score > bestScore) {
+        bestScore = score;
+        bestDir = d;
+      }
+    }
+    return bestDir;
+  }
+
+  private stepRival(r: Rival): void {
+    r.dir = this.chooseRivalDir(r);
+    const head = r.snake[0];
+    const nx = head.x + DIRS[r.dir].x;
+    const ny = head.y + DIRS[r.dir].y;
+    const bigger = r.snake.length > this.snake.length;
+    if (!this.rivalCanEnter(r, nx, ny, bigger) && !this.snakeCells.has(cellKey(nx, ny))) {
+      this.killRival(r, false);
+      return;
+    }
+    if (this.snakeCells.has(cellKey(nx, ny)) && this.mode.rivals === 'lethal' && this.effects.ghost <= 0) {
+      if (bigger) {
+        this.crash({ x: nx, y: ny });
+        return;
+      }
+      // Ran into a bigger (or equal) player: the player eats it.
+      this.killRival(r, true);
+      return;
+    }
+    r.prevSnake = r.snake.map((c) => ({ x: c.x, y: c.y }));
+    r.snake.unshift({ x: nx, y: ny });
+    addCount(r.cells, cellKey(nx, ny));
+    if (r.pendingGrow > 0) r.pendingGrow--;
+    else {
+      const t = r.snake.pop()!;
+      subCount(r.cells, cellKey(t.x, t.y));
+    }
+    const food = this.foodAt(nx, ny);
+    if (food && isBasic(food.type)) {
+      this.foods.splice(this.foods.indexOf(food), 1);
+      r.pendingGrow += FOODS[food.type].grow;
+      this.ensureApple();
     }
   }
 
@@ -512,7 +772,14 @@ export class Game {
   }
 
   private isFree(x: number, y: number): boolean {
-    return !this.snakeCells.has(cellKey(x, y)) && !this.isBlocked(x, y) && !this.isPortal(x, y) && !this.foodAt(x, y) && !this.moverAt(x, y);
+    return (
+      !this.snakeCells.has(cellKey(x, y)) &&
+      !this.isBlocked(x, y) &&
+      !this.isPortal(x, y) &&
+      !this.foodAt(x, y) &&
+      !this.moverAt(x, y) &&
+      !this.rivalAt(x, y)
+    );
   }
 
   private freeCell(minD: number, maxD: number): Vec | null {
@@ -646,3 +913,13 @@ export function createGame(modeId: keyof typeof MODES, difficulty: DifficultyCon
 }
 
 export { CHUNK };
+
+function addCount(m: Map<number, number>, k: number): void {
+  m.set(k, (m.get(k) ?? 0) + 1);
+}
+
+function subCount(m: Map<number, number>, k: number): void {
+  const n = (m.get(k) ?? 0) - 1;
+  if (n <= 0) m.delete(k);
+  else m.set(k, n);
+}

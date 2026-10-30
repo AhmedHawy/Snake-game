@@ -15,6 +15,10 @@ export interface DifficultyConfig {
   obstaclesPerChunk: number;
   /** Number of moving (patrolling) single-cell obstacles kept around the snake. */
   movingObstacles: number;
+  /** Rival snakes kept around the player (modes with rivals). */
+  rivals: number;
+  /** How eagerly bigger rivals chase the player (0..1). */
+  rivalAggression: number;
   /** Chance (0..1) after eating an apple that a special item appears. */
   specialChance: number;
   /** Chance (0..1) after eating an apple that a poison item appears (0 = never). */
@@ -40,6 +44,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     loopSpeedFactor: 0.93,
     obstaclesPerChunk: 0,
     movingObstacles: 0,
+    rivals: 2,
+    rivalAggression: 0.1,
     specialChance: 0.35,
     poisonChance: 0,
     goldenLifetimeMs: 14000,
@@ -56,6 +62,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     loopSpeedFactor: 0.9,
     obstaclesPerChunk: 1.6,
     movingObstacles: 0,
+    rivals: 3,
+    rivalAggression: 0.3,
     specialChance: 0.3,
     poisonChance: 0,
     goldenLifetimeMs: 12000,
@@ -72,6 +80,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     loopSpeedFactor: 0.88,
     obstaclesPerChunk: 2.8,
     movingObstacles: 0,
+    rivals: 4,
+    rivalAggression: 0.55,
     specialChance: 0.3,
     poisonChance: 0.2,
     goldenLifetimeMs: 8000,
@@ -88,6 +98,8 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
     loopSpeedFactor: 0.86,
     obstaclesPerChunk: 2.4,
     movingObstacles: 5,
+    rivals: 5,
+    rivalAggression: 0.8,
     specialChance: 0.3,
     poisonChance: 0.35,
     goldenLifetimeMs: 6000,

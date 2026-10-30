@@ -4,7 +4,8 @@ import { DIFFICULTY_ORDER, type DifficultyId } from '../config/difficulty';
 import { t, type I18nKey, type Lang } from '../config/i18n';
 import { MODE_ORDER, type ModeId } from '../config/modes';
 import type { BoardSize } from '../core/grid';
-import { SKINS, SKIN_ORDER, type SkinId } from '../config/skins';
+import { SKINS, SKIN_ORDER, isUnlocked, type SkinId } from '../config/skins';
+import { ZONES } from '../config/zones';
 import { drawSkinPreview } from '../render/preview';
 import type { Settings } from '../storage/storage';
 import { ICONS, h } from './dom';
@@ -18,6 +19,10 @@ export interface GameOverStats {
   zoneKey: I18nKey;
   loop: number;
   reason: 'crash' | 'timeUp' | 'ended';
+  /** Rivals defeated (rival modes only). */
+  rivalsKilled?: number;
+  /** Skins unlocked by this run's points. */
+  unlocked: SkinId[];
 }
 
 export interface UiHost {
@@ -31,14 +36,17 @@ export interface UiHost {
   updateSettings(patch: Partial<Settings>): void;
   tap(): void;
   bestFor(mode: ModeId, diff: DifficultyId): number;
+  /** Points collected over all runs (unlocks skins). */
+  totalPoints(): number;
   /** An exit button is only offered inside the installed Android app. */
   readonly canExit: boolean;
   exit(): void;
 }
 
-export type ScreenId = 'none' | 'main' | 'mode' | 'difficulty' | 'skins' | 'settings' | 'scores' | 'pause' | 'over';
+export type ScreenId = 'none' | 'main' | 'mode' | 'difficulty' | 'world' | 'skins' | 'settings' | 'scores' | 'pause' | 'over';
 
-const MODE_ICONS: Record<ModeId, string> = { classic: '🐍', portal: '🌀', zen: '🧘', timeAttack: '⏱️' };
+const MODE_ICONS: Record<ModeId, string> = { classic: '🐍', rivals: '⚔️', portal: '🌀', zen: '🧘', timeAttack: '⏱️' };
+const ZONE_ICONS = ['🌳', '🌵', '🐠', '⛄', '🌋', '🏙️', '🪐'];
 const DIFF_ICONS: Record<DifficultyId, string> = { easy: '🌱', normal: '⭐', hard: '🔥', extreme: '💀' };
 
 export class Screens {
@@ -55,6 +63,7 @@ export class Screens {
     switch (this.current) {
       case 'mode':
       case 'difficulty':
+      case 'world':
       case 'skins':
       case 'scores':
         this.tapThen(() => this.show('main'));
@@ -99,6 +108,9 @@ export class Screens {
         break;
       case 'difficulty':
         panel = this.difficultyPicker();
+        break;
+      case 'world':
+        panel = this.worldPicker();
         break;
       case 'skins':
         panel = this.skinPicker();
@@ -153,6 +165,7 @@ export class Screens {
       { class: 'chips' },
       h('span', { class: 'chip', text: `${MODE_ICONS[s.mode]} ${t(`mode.${s.mode}` as I18nKey)}` }),
       h('span', { class: 'chip', text: `${DIFF_ICONS[s.difficulty]} ${t(`diff.${s.difficulty}` as I18nKey)}` }),
+      h('span', { class: 'chip', text: this.worldLabel() }),
     );
     const best = this.host.bestFor(s.mode, s.difficulty);
     return h(
@@ -167,11 +180,36 @@ export class Screens {
         { class: 'grid2' },
         this.button(`${MODE_ICONS[s.mode]} ${t('menu.mode')}`, () => this.show('mode')),
         this.button(`${DIFF_ICONS[s.difficulty]} ${t('menu.difficulty')}`, () => this.show('difficulty')),
+        this.button(`${s.world >= 0 ? ZONE_ICONS[s.world] : '🌍'} ${t('menu.world')}`, () => this.show('world')),
         this.button(`🎨 ${t('menu.skins')}`, () => this.show('skins')),
         this.button(`⚙️ ${t('menu.settings')}`, () => this.show('settings')),
+        this.button(`🏆 ${t('menu.highScores')}`, () => this.show('scores')),
       ),
-      this.button(`🏆 ${t('menu.highScores')}`, () => this.show('scores'), 'btn-wide'),
       this.host.canExit ? this.button(`🚪 ${t('menu.exit')}`, () => this.host.exit(), 'btn-exit') : null,
+    );
+  }
+
+  private worldLabel(): string {
+    const w = this.host.settings.world;
+    return w >= 0 && ZONES[w] ? `${ZONE_ICONS[w]} ${t(ZONES[w].nameKey as I18nKey)}` : `🌍 ${t('world.journey')}`;
+  }
+
+  private worldPicker(): HTMLElement {
+    const s = this.host.settings;
+    const pick = (w: number) => {
+      this.host.updateSettings({ world: w });
+      this.show('main');
+    };
+    return h(
+      'div',
+      { class: 'panel' },
+      this.header('menu.world', 'main'),
+      h(
+        'div',
+        { class: 'cards' },
+        this.card('🌍', t('world.journey'), t('world.journey.desc'), s.world < 0, () => pick(-1)),
+        ...ZONES.map((z, i) => this.card(ZONE_ICONS[i], t(z.nameKey as I18nKey), t('world.only'), s.world === i, () => pick(i))),
+      ),
     );
   }
 
@@ -225,17 +263,22 @@ export class Screens {
   private skinPicker(): HTMLElement {
     const canvases: [HTMLCanvasElement, SkinId][] = [];
     const grid = h('div', { class: 'skins' });
+    const total = this.host.totalPoints();
     const render = () => {
       grid.replaceChildren(
         ...SKIN_ORDER.map((id) => {
           const cv = h('canvas', { class: 'skin-canvas' });
           canvases.push([cv, id]);
+          const open = isUnlocked(id, total);
+          const need = SKINS[id].unlockAt ?? 0;
           return h(
             'button',
             {
-              class: `skin${this.host.settings.skin === id ? ' selected' : ''}`,
+              class: `skin${this.host.settings.skin === id ? ' selected' : ''}${open ? '' : ' locked'}`,
+              attrs: open ? {} : { 'aria-disabled': 'true' },
               onClick: () =>
                 this.tapThen(() => {
+                  if (!open) return;
                   this.host.updateSettings({ skin: id });
                   canvases.length = 0;
                   render();
@@ -243,6 +286,8 @@ export class Screens {
             },
             cv,
             h('span', { text: t(SKINS[id].nameKey as I18nKey) }),
+            open ? null : h('small', { class: 'lock', text: t('skins.locked', { n: need }) }),
+            open ? null : h('span', { class: 'lock-bar', style: { width: `${Math.min(100, (total / need) * 100)}%` } }),
           );
         }),
       );
@@ -253,7 +298,7 @@ export class Screens {
       this.previewRaf = requestAnimationFrame(anim);
     };
     this.previewRaf = requestAnimationFrame(anim);
-    return h('div', { class: 'panel' }, this.header('menu.skins', 'main'), grid);
+    return h('div', { class: 'panel' }, this.header('menu.skins', 'main'), h('div', { class: 'total-points', text: `⭐ ${t('skins.total', { n: total })}` }), grid);
   }
 
   private toggle(labelKey: I18nKey, value: boolean, onChange: (v: boolean) => void): HTMLElement {
@@ -386,7 +431,9 @@ export class Screens {
         stat('over.foods', String(s.foods)),
         stat('over.combo', `×${s.longestCombo}`),
         stat('over.zone', zoneText),
+        s.rivalsKilled !== undefined ? stat('over.rivals', `⚔️ ${s.rivalsKilled}`) : null,
       ),
+      ...s.unlocked.map((id) => h('div', { class: 'new-best unlocked', text: `🎉 ${t('over.unlocked', { name: t(SKINS[id].nameKey as I18nKey) })}` })),
       h('div', { class: 'grid2' }, this.button(t('over.retry'), () => this.host.restart(), 'btn-play'), this.button(t('over.menu'), () => this.host.toMenu())),
     );
   }

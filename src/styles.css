@@ -788,3 +788,60 @@ button {
   direction: ltr;
   pointer-events: none;
 }
+
+/* ---------- Skin unlocks ---------- */
+.total-points {
+  text-align: center;
+  font-weight: 900;
+  color: #ffd23f;
+}
+.skin {
+  position: relative;
+  overflow: hidden;
+}
+.skin.locked {
+  opacity: 0.55;
+  filter: grayscale(0.7);
+}
+.skin .lock {
+  font-weight: 700;
+  font-size: 13px;
+  color: #ffd23f;
+}
+.lock-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  background: #ffd23f;
+}
+.new-best.unlocked {
+  background: linear-gradient(90deg, #7ee8c7, #5ee6ff);
+  color: #00303a;
+}
+
+/* ---------- Rival length labels ---------- */
+.rival-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 14px;
+  color: #fff;
+  pointer-events: none;
+  direction: ltr;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.rival-tag.prey {
+  background: #2fbf45;
+}
+.rival-tag.threat {
+  background: #e8475b;
+}
+.rival-tag.calm {
+  background: rgba(40, 50, 70, 0.7);
+}

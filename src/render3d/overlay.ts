@@ -10,7 +10,16 @@ export interface ScreenPoint {
   visible: boolean;
 }
 
+/** Length label above a rival's head. */
+export interface RivalTag {
+  at: ScreenPoint;
+  text: string;
+  /** prey = you can eat it, threat = it can eat you, calm = harmless (Zen). */
+  kind: 'prey' | 'threat' | 'calm';
+}
+
 export class Overlay {
+  private readonly tagPool: HTMLElement[] = [];
   private readonly layer: HTMLElement;
   private readonly flash: HTMLElement;
   private readonly arrow: HTMLElement;
@@ -25,6 +34,26 @@ export class Overlay {
     this.arrow.className = 'food-arrow hidden';
     this.arrow.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 14H4z"/></svg><span>🍎</span>';
     root.append(this.layer, this.flash, this.arrow);
+  }
+
+  tags(list: RivalTag[]): void {
+    while (this.tagPool.length < list.length) {
+      const el = document.createElement('div');
+      this.layer.append(el);
+      this.tagPool.push(el);
+    }
+    this.tagPool.forEach((el, i) => {
+      const tg = list[i];
+      if (!tg || !tg.at.visible) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'block';
+      const cls = `rival-tag ${tg.kind}`;
+      if (el.className !== cls) el.className = cls;
+      if (el.textContent !== tg.text) el.textContent = tg.text;
+      el.style.transform = `translate(${tg.at.x}px, ${tg.at.y}px) translate(-50%, -100%)`;
+    });
   }
 
   update(

@@ -40,3 +40,17 @@ describe('storage', () => {
     expect(bestScore('portal', 'easy', kv)).toBe(0);
   });
 });
+
+describe('progress', () => {
+  it('adds run scores to the total', async () => {
+    const { addPoints, totalPoints } = await import('../src/storage/storage');
+    const kv = memory();
+    expect(totalPoints(kv)).toBe(0);
+    expect(addPoints(120, kv)).toBe(120);
+    expect(addPoints(-50, kv)).toBe(120);
+    expect(addPoints(30, kv)).toBe(150);
+    expect(totalPoints(kv)).toBe(150);
+    kv.setItem('snakerush.progress.v1', 'garbage');
+    expect(totalPoints(kv)).toBe(0);
+  });
+});

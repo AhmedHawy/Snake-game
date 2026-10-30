@@ -1041,3 +1041,30 @@ button {
   height: 100%;
   background: #ffd23f;
 }
+
+/* Combo + power-up chips: float at the bottom centre of the board. */
+.hud-float {
+  position: absolute;
+  z-index: 3;
+  left: var(--board-x, 0);
+  width: var(--board-w, 100%);
+  top: calc(var(--board-bottom, 100%) - 50px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* D-pad drawn over the board: see-through so the game shows under it. */
+#dpad.overlay .dp {
+  /* Dark glass reads on bright (snow, desert) and dark (space) worlds alike. */
+  background: rgba(10, 16, 40, 0.32);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+#dpad.overlay .dp svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+#dpad.overlay .dp.down {
+  background: rgba(10, 16, 40, 0.6);
+}

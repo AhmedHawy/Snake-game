@@ -1,7 +1,7 @@
 // In-game HUD bar (above the board, never over it). DOM writes only happen
 // when a value actually changes.
 import { EFFECT_COLORS, type TimedEffect } from '../config/food';
-import { t, type I18nKey } from '../config/i18n';
+import { t } from '../config/i18n';
 import { TIMED_EFFECTS, type Game } from '../core/state';
 import { ICONS, h } from './dom';
 
@@ -16,7 +16,7 @@ export class Hud {
   private readonly scoreEl: HTMLElement;
   private readonly subEl: HTMLElement;
   private readonly lengthEl: HTMLElement;
-  private readonly zoneEl: HTMLElement;
+  private readonly floatEl: HTMLElement;
   private readonly effectsEl: HTMLElement;
   private readonly comboEl: HTMLElement;
   private readonly comboBar: HTMLElement;
@@ -32,7 +32,6 @@ export class Hud {
     this.scoreEl = h('div', { class: 'hud-score', text: '0' });
     this.subEl = h('div', { class: 'hud-sub' });
     this.lengthEl = h('div', { class: 'hud-len' });
-    this.zoneEl = h('div', { class: 'hud-zone' });
     this.effectsEl = h('div', { class: 'hud-effects' });
     this.comboText = h('span', { class: 'combo-text' });
     this.comboBar = h('span', { class: 'combo-bar' });
@@ -51,13 +50,16 @@ export class Hud {
         h('div', { class: 'hud-center' }, this.scoreEl, this.subEl),
         h('div', { class: 'hud-side hud-end' }, this.lengthEl),
       ),
-      h('div', { class: 'hud-row hud-row2' }, this.zoneEl, h('div', { class: 'hud-side hud-end' }, this.comboEl, this.effectsEl)),
     );
+    // Combo and power-up chips float at the bottom of the board (no second HUD row).
+    this.floatEl = h('div', { class: 'hud-float hidden' }, this.comboEl, this.effectsEl);
+    root.parentElement?.append(this.floatEl);
     this.refreshLabels();
   }
 
   show(visible: boolean): void {
     this.root.classList.toggle('hidden', !visible);
+    this.floatEl.classList.toggle('hidden', !visible);
   }
 
   refreshLabels(): void {
@@ -68,7 +70,7 @@ export class Hud {
   setMuted(muted: boolean): void {
     this.muteBtn.innerHTML = muted ? ICONS.soundOff : ICONS.soundOn;
     this.muteBtn.classList.toggle('muted', muted);
-    this.muteBtn.setAttribute('aria-label', t('settings.mute'));
+    this.muteBtn.setAttribute('aria-label', t('settings.sound'));
   }
 
   private set(key: string, value: string | number | boolean, apply: () => void): void {
@@ -98,10 +100,6 @@ export class Hud {
       });
     }
     this.set('len', game.snake.length, () => (this.lengthEl.textContent = `${t('hud.length')} ${game.snake.length}`));
-    this.set('zone', game.zoneIndex, () => {
-      this.zoneEl.textContent = t(game.zone.nameKey as I18nKey);
-      this.zoneEl.style.color = game.zone.palette.accent;
-    });
 
     for (const e of TIMED_EFFECTS) {
       const left = game.effects[e];

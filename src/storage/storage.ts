@@ -15,6 +15,8 @@ export interface Settings {
   lang: Lang;
   dpad: boolean;
   dpadSide: 'left' | 'right';
+  /** D-pad drawn over the board (true) or in its own space under / beside it. */
+  dpadOverlay: boolean;
   mode: ModeId;
   difficulty: DifficultyId;
   /** Zoom: how big cells look on screen. */
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lang: 'ar',
   dpad: false,
   dpadSide: 'right',
+  dpadOverlay: true,
   mode: 'classic',
   difficulty: 'normal',
   boardSize: 'large',

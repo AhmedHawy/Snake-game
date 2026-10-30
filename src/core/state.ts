@@ -24,6 +24,7 @@ import { Rng } from './rng';
 import { CHUNK, ObstacleWorld, cellKey, randomCellNear } from './spawn';
 import { SKINS, type SkinId } from '../config/skins';
 import { ABILITIES, type AbilityConfig, type AbilityId, type HazardKind } from '../config/abilities';
+import { boostAbility } from '../config/levels';
 import { DIRS, chebyshev, isOpposite, manhattan, type Dir, type Vec } from './types';
 
 export interface FoodItem {
@@ -66,13 +67,21 @@ export type GameEvent =
   | { type: 'spawn'; food: FoodItem }
   /** A rival (or the ally: `rival.ally`) died. `byAlly`: the ally defeated it. */
   | { type: 'rivalKilled'; rival: Rival; cells: Vec[]; byPlayer: boolean; byAlly: boolean; points: number }
-  /** `real`: fired on purpose (hits things); otherwise the after-meal show-off breath. */
-  | { type: 'breath'; ability: AbilityId; from: Vec; dir: Dir; cells: Vec[]; targets: Vec[]; strong: boolean; real: boolean }
+  /**
+   * `real`: fired on purpose (hits things); otherwise the after-meal show-off breath.
+   * `source`: who breathed (the player, the ally or the boss).
+   */
+  | { type: 'breath'; ability: AbilityId; from: Vec; dir: Dir; cells: Vec[]; targets: Vec[]; strong: boolean; real: boolean; source: BreathSource }
+  /** The boss's fire hit the player (who lost `removed`). */
+  | { type: 'playerBurned'; removed: number }
+  | { type: 'bossDefeated'; points: number }
   | { type: 'charge'; charges: number; strong: boolean }
   | { type: 'rivalHit'; rival: Rival; removed: Vec[]; points: number }
   | { type: 'smash'; cells: Vec[]; points: number }
-  | { type: 'wave'; wave: number }
+  | { type: 'wave'; wave: number; boss: boolean }
   | { type: 'waveCleared'; wave: number };
+
+export type BreathSource = 'player' | 'ally' | 'boss';
 
 /** A patch of ground left by a breath that hurts rivals crossing it. */
 export interface Hazard {
@@ -87,6 +96,10 @@ export interface Rival {
   id: number;
   /** The player's friend (Rivals mode): same look as the player, fights the rivals. */
   ally: boolean;
+  /** A huge rival that breathes fire (every 5th wave). */
+  boss: boolean;
+  /** Time until the ally / boss can breathe again (ms). */
+  breathMs: number;
   snake: Vec[];
   prevSnake: Vec[];
   dir: Dir;
@@ -121,10 +134,19 @@ export interface Rival {
 const RIVAL_SKINS: SkinId[] = ['tiger', 'ocean', 'rainbow', 'classic', 'dragonSea', 'dragon', 'lava'];
 /** Rival lengths relative to the player: some are prey, some are threats. */
 const RIVAL_LENGTH_OFFSETS = [-3, 4, -1, 7, -4];
+/** Looks a boss can have (never the player's own). */
+const BOSS_SKINS: SkinId[] = ['dragonShadow', 'lava', 'dragon'];
 const RIVAL_POINTS_PER_SEGMENT = 5;
 /** Pause between clearing a wave and the next one. */
 export const WAVE_DELAY_MS = 5000;
 const MAX_RIVALS = 8;
+/** Every Nth wave is led by a boss. */
+export const BOSS_EVERY = 5;
+const BOSS_BONUS = 500;
+export const ALLY_BREATH_MS = 6000;
+export const BOSS_BREATH_MS = 3500;
+/** Segments the player loses to the boss's fire. */
+const BOSS_BURN = 2;
 /** Swiping the way the dragon already goes: sprint. */
 export const SPRINT_MS = 1500;
 export const SPRINT_MAX_MS = 3000;
@@ -144,6 +166,8 @@ export interface GameOptions {
   viewRadius?: number;
   /** The player's skin (rivals pick different ones). */
   playerSkin?: SkinId;
+  /** The player's dragon level (1..5): makes its breath stronger. */
+  abilityLevel?: number;
 }
 
 export const TIMED_EFFECTS: TimedEffect[] = ['speed', 'slow', 'ghost', 'magnet'];
@@ -222,6 +246,9 @@ export class Game {
   strongCharge = false;
   /** Player skin (rivals avoid wearing the same one). */
   playerSkin: SkinId = 'classic';
+  /** Dragon level (1..5) and the breath it gives. */
+  abilityLevel = 1;
+  private abilityCfg: AbilityConfig = ABILITIES.fire;
   events: GameEvent[] = [];
   private nextId = 1;
   private snakeCells = new Map<number, number>();
@@ -241,6 +268,8 @@ export class Game {
     this.indexSnake();
 
     this.playerSkin = opts.playerSkin ?? 'classic';
+    this.abilityLevel = Math.max(1, Math.round(opts.abilityLevel ?? 1));
+    this.abilityCfg = boostAbility(ABILITIES[SKINS[this.playerSkin]?.ability ?? 'fire'], this.abilityLevel);
     this.placePortals();
     this.refreshWorld();
     this.ensureApple();
@@ -625,18 +654,20 @@ export class Game {
     return r.frozenMs > 0 || r.markedMs > 0;
   }
 
-  private newRival(index: number, ally = false): Rival {
+  private newRival(index: number, ally = false, boss = false): Rival {
     const skins = RIVAL_SKINS.filter((s) => s !== this.playerSkin);
     const r: Rival = {
       id: this.nextId++,
       ally,
+      boss: false,
+      breathMs: ally ? ALLY_BREATH_MS : BOSS_BREATH_MS,
       snake: [],
       prevSnake: [],
       dir: 0,
       pendingGrow: 0,
       growCredit: 0,
       moveTimer: this.rng.next() * 100,
-      skin: ally ? this.playerSkin : skins[index % skins.length],
+      skin: ally ? this.playerSkin : boss ? BOSS_SKINS.find((b) => b !== this.playerSkin)! : skins[index % skins.length],
       alive: false,
       dead: false,
       respawnMs: 0,
@@ -651,6 +682,7 @@ export class Game {
       cells: new Map(),
       status: 'playing',
     };
+    r.boss = boss;
     this.placeRival(r, index);
     return r;
   }
@@ -660,7 +692,11 @@ export class Game {
     // Later waves bring longer rivals.
     const offset = RIVAL_LENGTH_OFFSETS[index % RIVAL_LENGTH_OFFSETS.length] + this.rng.int(3) - 1 + (this.wave - 1) * 2;
     // The ally starts as long as the player, close by.
-    const len = r.ally ? Math.max(3, this.snake.length) : Math.max(3, Math.min(60, this.snake.length + offset));
+    const len = r.ally
+      ? Math.max(3, this.snake.length)
+      : r.boss
+        ? Math.min(80, this.snake.length + 12 + this.wave)
+        : Math.max(3, Math.min(60, this.snake.length + offset));
     const near = r.ally ? 4 : this.viewRadius + 4;
     const minGap = r.ally ? 2 : 4;
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -701,6 +737,10 @@ export class Game {
       this.score += points;
       this.allyKills++;
     }
+    if (r.boss && (byPlayer || byAlly)) {
+      this.score += BOSS_BONUS;
+      this.events.push({ type: 'bossDefeated', points: BOSS_BONUS + points });
+    }
     this.events.push({ type: 'rivalKilled', rival: r, cells: r.snake.map((c) => ({ ...c })), byPlayer, byAlly, points });
     r.alive = false;
     r.dead = true;
@@ -708,13 +748,13 @@ export class Game {
   }
 
   /** Removes `n` tail segments from a rival; it dies once shorter than 3. */
-  private damageRival(r: Rival, n: number, bonus = 0): number {
+  private damageRival(r: Rival, n: number, bonus = 0, byAlly = false): number {
     if (!r.alive || n <= 0) return 0;
     this.score += bonus;
     if (r.snake.length - n < MIN_LENGTH) {
-      // Too weak to survive: the player defeats it (and gets its points).
+      // Too weak to survive: the player (or the ally) defeats it and gets its points.
       const len = r.snake.length;
-      this.killRival(r, true);
+      this.killRival(r, !byAlly, byAlly);
       return len;
     }
     const removed = r.snake.splice(r.snake.length - n, n);
@@ -746,16 +786,16 @@ export class Game {
 
   // --------------------------------------------------------------- breath
 
-  /** The player's breath ability (from the dragon skin). */
+  /** The player's breath ability (from the dragon skin, boosted by its level). */
   get ability(): AbilityConfig {
-    return ABILITIES[SKINS[this.playerSkin]?.ability ?? 'fire'];
+    return this.abilityCfg;
   }
 
-  /** Cells covered by a breath from the head (see BreathShape). */
-  breathCells(ab: AbilityConfig, strong: boolean): Vec[] {
-    const h = this.head;
-    const d = DIRS[this.dir];
-    const p = DIRS[(this.dir + 1) % 4];
+  /** Cells covered by a breath from `from` facing `dir` (default: the player's head). */
+  breathCells(ab: AbilityConfig, strong: boolean, from: Vec = this.head, dir: Dir = this.dir): Vec[] {
+    const h = from;
+    const d = DIRS[dir];
+    const p = DIRS[(dir + 1) % 4];
     const range = strong ? ab.range * 2 : ab.range;
     const cells: Vec[] = [];
     const seen = new Set<number>();
@@ -825,7 +865,7 @@ export class Game {
     const d = DIRS[this.dir];
     const cells = this.breathCells(ab, strong);
     if (!real) {
-      this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets: [], strong, real });
+      this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets: [], strong, real, source: 'player' });
       return;
     }
 
@@ -840,63 +880,21 @@ export class Game {
       }
     }
 
-    // Rivals hit (only where rivals fight back).
-    const hit: Rival[] = [];
-    const targets: Vec[] = [];
-    if (this.mode.rivals === 'lethal') {
-      if (ab.shape === 'chain') {
-        const reach = strong ? ab.range * 2 : ab.range;
-        const near = this.rivals
-          .filter((r) => r.alive && !r.ally)
-          .map((r) => {
-            let best = r.snake[0];
-            for (const c of r.snake) if (manhattan(c, h) < manhattan(best, h)) best = c;
-            return { r, c: best, dist: manhattan(best, h) };
-          })
-          .filter((o) => o.dist <= reach)
-          .sort((a, b) => a.dist - b.dist)
-          .slice(0, strong ? 5 : 3);
-        for (const o of near) {
-          hit.push(o.r);
-          targets.push({ ...o.c });
-        }
-      }
-      for (const c of cells) {
-        const r = this.enemyAt(c.x, c.y);
-        if (r && !hit.includes(r)) hit.push(r);
-      }
-    }
-
-    this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets, strong, real });
+    const { hit, targets } = this.breathTargets(ab, strong, h, cells);
+    this.events.push({ type: 'breath', ability: ab.id, from: { ...h }, dir: this.dir, cells, targets, strong, real, source: 'player' });
     if (smashed.length) {
       const points = smashed.length * SMASH_POINTS;
       this.score += points;
       this.smashed += smashed.length;
       this.events.push({ type: 'smash', cells: smashed, points });
     }
-
-    for (const r of hit) {
-      if (ab.burnMs) r.burnMs = Math.max(r.burnMs, ab.burnMs);
-      if (ab.poisonMs) r.poisonMs = Math.max(r.poisonMs, ab.poisonMs);
-      if (ab.freezeMs) r.frozenMs = Math.max(r.frozenMs, ab.freezeMs);
-      if (ab.stunMs) r.stunMs = Math.max(r.stunMs, ab.stunMs);
-      if (ab.confuseMs) r.confuseMs = Math.max(r.confuseMs, ab.confuseMs);
-      if (ab.fearMs) r.fearMs = Math.max(r.fearMs, ab.fearMs);
-      if (ab.markMs) r.markedMs = Math.max(r.markedMs, ab.markMs);
-      if (ab.push) this.pushRival(r, d, ab.push);
-      const taken = this.damageRival(r, ab.damage + (strong ? 1 : 0), ab.bonusPerHit ?? 0);
-      if (ab.steal) this.pendingGrow += Math.min(taken, ab.damage + 1);
-    }
+    const stolen = this.applyBreath(ab, hit, d, ab.damage + (strong ? 1 : 0), false);
+    this.pendingGrow += stolen;
     if (ab.stunAllMs && this.mode.rivals === 'lethal') {
-      for (const r of this.rivals) if (r.alive && !r.ally && chebyshev(r.snake[0], h) <= this.viewRadius * 2) r.stunMs = Math.max(r.stunMs, ab.stunAllMs);
+      for (const r of this.rivals) if (r.alive && !r.ally && chebyshev(r.snake[0], h) <= this.viewRadius * 2) r.stunMs = Math.max(r.stunMs, r.boss ? ab.stunAllMs / 2 : ab.stunAllMs);
     }
     if (ab.invisibleMs) this.invisibleMs = Math.max(this.invisibleMs, ab.invisibleMs);
-    if (ab.hazard && ab.hazardMs) {
-      for (const c of cells) {
-        if (this.isBlocked(c.x, c.y)) continue;
-        this.hazards.set(cellKey(c.x, c.y), { x: c.x, y: c.y, kind: ab.hazard, untilMs: this.timeMs + ab.hazardMs });
-      }
-    }
+    this.leaveHazard(ab, cells);
     if (ab.pullFood) {
       // Everyday food nearby is sucked into the black hole.
       const cx = h.x + d.x * ab.range;
@@ -907,6 +905,102 @@ export class Game {
         if (spot) f.pos = spot;
       }
     }
+  }
+
+  /** Rivals a breath from `from` hits (only where rivals fight back). */
+  private breathTargets(ab: AbilityConfig, strong: boolean, from: Vec, cells: Vec[]): { hit: Rival[]; targets: Vec[] } {
+    const hit: Rival[] = [];
+    const targets: Vec[] = [];
+    if (this.mode.rivals !== 'lethal') return { hit, targets };
+    if (ab.shape === 'chain') {
+      const reach = strong ? ab.range * 2 : ab.range;
+      const near = this.rivals
+        .filter((r) => r.alive && !r.ally)
+        .map((r) => {
+          let best = r.snake[0];
+          for (const c of r.snake) if (manhattan(c, from) < manhattan(best, from)) best = c;
+          return { r, c: best, dist: manhattan(best, from) };
+        })
+        .filter((o) => o.dist <= reach)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, strong ? 5 : 3);
+      for (const o of near) {
+        hit.push(o.r);
+        targets.push({ ...o.c });
+      }
+    }
+    for (const c of cells) {
+      const r = this.enemyAt(c.x, c.y);
+      if (r && !hit.includes(r)) hit.push(r);
+    }
+    return { hit, targets };
+  }
+
+  /** Applies a breath's effects to the rivals hit. Returns the segments stolen (leaf storm). */
+  private applyBreath(ab: AbilityConfig, hit: Rival[], d: Vec, damage: number, byAlly: boolean): number {
+    let stolen = 0;
+    for (const r of hit) {
+      // Bosses shrug off half of every status and can't be pushed or confused.
+      const k = r.boss ? 0.5 : 1;
+      if (ab.burnMs) r.burnMs = Math.max(r.burnMs, ab.burnMs);
+      if (ab.poisonMs) r.poisonMs = Math.max(r.poisonMs, ab.poisonMs);
+      if (ab.freezeMs) r.frozenMs = Math.max(r.frozenMs, ab.freezeMs * k);
+      if (ab.stunMs) r.stunMs = Math.max(r.stunMs, ab.stunMs * k);
+      if (ab.confuseMs && !r.boss) r.confuseMs = Math.max(r.confuseMs, ab.confuseMs);
+      if (ab.fearMs) r.fearMs = Math.max(r.fearMs, ab.fearMs * k);
+      if (ab.markMs) r.markedMs = Math.max(r.markedMs, ab.markMs * k);
+      if (ab.push && !r.boss) this.pushRival(r, d, ab.push);
+      const taken = this.damageRival(r, damage, ab.bonusPerHit ?? 0, byAlly);
+      if (ab.steal) stolen += Math.min(taken, damage);
+    }
+    return stolen;
+  }
+
+  private leaveHazard(ab: AbilityConfig, cells: Vec[]): void {
+    if (!ab.hazard || !ab.hazardMs) return;
+    for (const c of cells) {
+      if (this.isBlocked(c.x, c.y)) continue;
+      this.hazards.set(cellKey(c.x, c.y), { x: c.x, y: c.y, kind: ab.hazard, untilMs: this.timeMs + ab.hazardMs });
+    }
+  }
+
+  /** The ally breathes the player's ability (a bit weaker) when a rival is in reach. */
+  private allyBreathe(r: Rival): boolean {
+    const ab = this.ability;
+    const cells = this.breathCells(ab, false, r.snake[0], r.dir);
+    const { hit, targets } = this.breathTargets(ab, false, r.snake[0], cells);
+    if (hit.length === 0) return false;
+    this.events.push({ type: 'breath', ability: ab.id, from: { ...r.snake[0] }, dir: r.dir, cells, targets, strong: false, real: true, source: 'ally' });
+    r.pendingGrow += this.applyBreath(ab, hit, DIRS[r.dir], Math.max(1, ab.damage - 1), true);
+    this.leaveHazard(ab, cells);
+    return true;
+  }
+
+  /** The boss breathes fire when the player or the ally is in front of it. */
+  private bossBreathe(r: Rival): boolean {
+    const fire = ABILITIES.fire;
+    const cells = this.breathCells(fire, false, r.snake[0], r.dir);
+    const keys = new Set(cells.map((c) => cellKey(c.x, c.y)));
+    const hitsPlayer = this.effects.ghost <= 0 && this.snake.some((c) => keys.has(cellKey(c.x, c.y)));
+    const ally = this.ally;
+    const hitsAlly = !!ally && ally.alive && ally.snake.some((c) => keys.has(cellKey(c.x, c.y)));
+    if (!hitsPlayer && !hitsAlly) return false;
+    this.events.push({ type: 'breath', ability: 'fire', from: { ...r.snake[0] }, dir: r.dir, cells, targets: [], strong: false, real: true, source: 'boss' });
+    if (hitsPlayer) {
+      const before = this.snake.length;
+      this.shrink(BOSS_BURN, false);
+      this.events.push({ type: 'playerBurned', removed: before - this.snake.length });
+    }
+    if (hitsAlly && ally) {
+      if (ally.snake.length - BOSS_BURN < MIN_LENGTH) this.killRival(ally, false);
+      else {
+        const removed = ally.snake.splice(ally.snake.length - BOSS_BURN, BOSS_BURN);
+        for (const c of removed) subCount(ally.cells, cellKey(c.x, c.y));
+        ally.prevSnake.length = Math.min(ally.prevSnake.length, ally.snake.length);
+        ally.burnMs = 0;
+      }
+    }
+    return true;
   }
 
   private updateRivals(dt: number): void {
@@ -934,6 +1028,12 @@ export class Game {
         }
       } else r.dotMs = 0;
       if (r.frozenMs > 0 || r.stunMs > 0) return;
+      // The ally and the boss breathe now and then (when someone is in reach).
+      if ((r.ally || r.boss) && this.mode.rivals === 'lethal') {
+        r.breathMs -= dt;
+        if (r.breathMs <= 0 && (r.ally ? this.allyBreathe(r) : this.bossBreathe(r))) r.breathMs = r.ally ? ALLY_BREATH_MS : BOSS_BREATH_MS;
+        if (!r.alive || this.status !== 'playing') return;
+      }
       r.moveTimer += dt;
       if (r.moveTimer >= step) {
         r.moveTimer -= step;
@@ -958,12 +1058,15 @@ export class Game {
     this.waveTimerMs = 0;
     this.wave++;
     const count = Math.min(MAX_RIVALS, this.diff.rivals + this.wave - 1);
+    // Every 5th wave: a boss leads a smaller pack.
+    const boss = this.wave % BOSS_EVERY === 0;
     // A fallen ally comes back with the new wave.
     const ally = this.ally;
     this.rivals = [];
-    for (let i = 0; i < count; i++) this.rivals.push(this.newRival(i));
+    if (boss) this.rivals.push(this.newRival(0, false, true));
+    for (let i = 0; i < (boss ? Math.max(1, this.diff.rivals - 1) : count); i++) this.rivals.push(this.newRival(i));
     if (ally) this.rivals.push(ally.alive ? ally : this.newRival(0, true));
-    if (this.mode.rivals === 'lethal') this.events.push({ type: 'wave', wave: this.wave });
+    if (this.mode.rivals === 'lethal') this.events.push({ type: 'wave', wave: this.wave, boss });
   }
 
   /** Can rival `r` move into (x, y)? */
@@ -1078,7 +1181,8 @@ export class Game {
       }
     }
     const playerDist = manhattan(head, this.head);
-    if (lethal && bigger && playerDist < 10 && this.rng.chance(this.diff.rivalAggression)) {
+    // Bosses hunt hard and from further away.
+    if (lethal && bigger && playerDist < (r.boss ? 16 : 10) && this.rng.chance(r.boss ? 0.85 : this.diff.rivalAggression)) {
       const pd = DIRS[this.dir];
       target = { x: this.head.x + pd.x * 2, y: this.head.y + pd.y * 2 };
     }

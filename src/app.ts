@@ -20,12 +20,13 @@ import { bindLifecycle, exitApp } from './platform/lifecycle';
 import { readSafeArea } from './platform/safeArea';
 import { Capacitor } from '@capacitor/core';
 import { Renderer3D } from './render3d/scene';
-import { addPoints, bestScore, loadSettings, saveSettings, submitScore, totalPoints, type Settings } from './storage/storage';
+import { addDragonXp, dragonXp, addPoints, bestScore, loadSettings, saveSettings, submitScore, totalPoints, type Settings } from './storage/storage';
 import { hideZoneBanner, showBanner, showZoneBanner } from './ui/banner';
 import type { AbilityId } from './config/abilities';
 import { Hud } from './ui/hud';
 import { AbilityButton } from './ui/abilityButton';
 import { Portraits } from './ui/portraits';
+import { levelFor } from './config/levels';
 import { Screens, type UiHost } from './ui/screens';
 import { showToast } from './ui/toast';
 
@@ -183,6 +184,7 @@ export class App implements UiHost {
     if (this.inGame && !this.overShown && this.game.score > 0) {
       submitScore(this.settings.mode, this.settings.difficulty, this.game.score);
       this.total = addPoints(this.game.score);
+      addDragonXp(this.game.playerSkin, this.game.score);
     }
     this.inGame = false;
     this.paused = false;
@@ -206,6 +208,10 @@ export class App implements UiHost {
 
   totalPoints(): number {
     return this.total;
+  }
+
+  dragonXp(id: SkinId): number {
+    return dragonXp(id);
   }
 
   bestFor(mode: ModeId, diff: DifficultyId): number {
@@ -364,6 +370,7 @@ export class App implements UiHost {
       viewRadius: Math.ceil(this.shortCells / 2) + 1,
       zones: s.world >= 0 && ZONES[s.world] ? [ZONES[s.world]] : undefined,
       playerSkin: this.skin.id,
+      abilityLevel: levelFor(dragonXp(this.skin.id)),
     });
     this.best = bestScore(s.mode, s.difficulty);
     this.fx.reset();
@@ -483,7 +490,7 @@ export class App implements UiHost {
           break;
         }
         case 'breath':
-          this.fx.onBreath(e.ability, e.from, e.dir, e.cells, e.targets, e.strong, e.real);
+          this.fx.onBreath(e.ability, e.from, e.dir, e.cells, e.targets, e.strong, e.real, e.source);
           if (e.real) this.sfx.breath(BREATH_SOUND[e.ability]);
           break;
         case 'rivalHit': {
@@ -502,8 +509,20 @@ export class App implements UiHost {
           haptics.powerUp();
           break;
         case 'wave':
-          showBanner('⚔️', t('wave.title', { n: e.wave }), '#ff5c5c');
+          if (e.boss) showBanner(t('wave.title', { n: e.wave }), `👹 ${t('boss.comes')}`, '#ff3b1f');
+          else showBanner('⚔️', t('wave.title', { n: e.wave }), '#ff5c5c');
           this.sfx.zone();
+          if (e.boss) haptics.crash();
+          break;
+        case 'playerBurned':
+          this.fx.onBurned();
+          this.fx.popup(head.x, 1.2, head.z, e.removed > 0 ? `🔥 -${e.removed}` : '🔥', '#ff6a00', 26);
+          haptics.bad();
+          break;
+        case 'bossDefeated':
+          showBanner(`+${e.points}`, `👹 ${t('boss.defeated')}`, '#ffd23f');
+          this.sfx.golden();
+          haptics.powerUp();
           break;
         case 'timeUp':
           this.sfx.timeUp();
@@ -533,6 +552,9 @@ export class App implements UiHost {
     const before = this.total;
     const after = (this.total = addPoints(g.score));
     const unlocked = SKIN_ORDER.filter((id: SkinId) => !isUnlocked(id, before) && isUnlocked(id, after));
+    // The dragon that played gains this run's score as experience.
+    const levelBefore = g.abilityLevel;
+    const levelAfter = levelFor(addDragonXp(g.playerSkin, g.score));
     this.best = bestScore(s.mode, s.difficulty);
     this.screens.show('over', {
       score: g.score,
@@ -546,6 +568,7 @@ export class App implements UiHost {
       rivalsKilled: g.mode.rivals === 'lethal' ? g.rivalsKilled : undefined,
       allyKills: g.mode.rivals === 'lethal' ? g.allyKills : undefined,
       unlocked,
+      levelUp: levelAfter > levelBefore ? { skin: g.playerSkin, level: levelAfter } : undefined,
     });
   }
 

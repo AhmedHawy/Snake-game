@@ -127,3 +127,25 @@ export function addPoints(points: number, kv: KV | null = defaultKV()): number {
 export function bestScore(mode: ModeId, diff: DifficultyId, kv: KV | null = defaultKV()): number {
   return loadScores(kv)[scoreKey(mode, diff)] ?? 0;
 }
+
+const DRAGONS_KEY = 'snakerush.dragons.v1';
+
+/** Experience of every dragon (the score of each run played with it). */
+export function loadDragonXp(kv: KV | null = defaultKV()): Record<string, number> {
+  const raw = readJson<Record<string, number>>(kv, DRAGONS_KEY) ?? {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = v;
+  return out;
+}
+
+export function dragonXp(skin: SkinId, kv: KV | null = defaultKV()): number {
+  return loadDragonXp(kv)[skin] ?? 0;
+}
+
+/** Adds a run's score to that dragon's experience; returns the new total. */
+export function addDragonXp(skin: SkinId, points: number, kv: KV | null = defaultKV()): number {
+  const all = loadDragonXp(kv);
+  all[skin] = (all[skin] ?? 0) + Math.max(0, Math.round(points));
+  writeJson(kv, DRAGONS_KEY, all);
+  return all[skin];
+}

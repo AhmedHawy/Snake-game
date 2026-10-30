@@ -138,7 +138,7 @@ export class Fx {
   }
 
   /** Dragon breath: a burst of the ability's particles over the cells it hits. */
-  onBreath(ability: AbilityId, from: Vec, dir: Dir, cells: Vec[], targets: Vec[], strong: boolean, real: boolean): void {
+  onBreath(ability: AbilityId, from: Vec, dir: Dir, cells: Vec[], targets: Vec[], strong: boolean, real: boolean, source: 'player' | 'ally' | 'boss' = 'player'): void {
     const ab = ABILITIES[ability];
     const p = this.particles;
     const d = DIRS[dir];
@@ -204,7 +204,7 @@ export class Fx {
         }
       }
     }
-    if (!real) return;
+    if (!real || source !== 'player') return;
     this.headPop = 1;
     this.popup(from.x, 1.5, from.y, ab.icon, '#ffffff', strong ? 34 : 26);
     if (strong || ability === 'royal') this.addShake(0.35);
@@ -224,6 +224,12 @@ export class Fx {
       this.particles.burst(c.x, 0.5, c.y, '#ffd23f', 6, 4, 0.12, 400, { glow: true });
     }
     this.addShake(0.2);
+  }
+
+  /** The boss's fire hit the player. */
+  onBurned(): void {
+    this.flash = 0.45;
+    this.addShake(0.6);
   }
 
   addShake(amount: number): void {

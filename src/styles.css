@@ -1008,3 +1008,36 @@ button {
   border-color: #ffd23f;
   box-shadow: 0 0 10px #ffd23f;
 }
+.portrait.boss .portrait-ring {
+  width: 46px;
+  height: 46px;
+  border-width: 4px;
+}
+.portrait.boss img {
+  width: 44px;
+  height: 44px;
+}
+.portrait.boss b::before {
+  content: '👹 ';
+}
+.skin .level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffd23f;
+}
+.skin .xp-bar {
+  width: 70%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+.skin .xp-bar i {
+  display: block;
+  height: 100%;
+  background: #ffd23f;
+}

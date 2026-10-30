@@ -311,7 +311,7 @@ export class Renderer3D {
         alpha: game.status === 'playing' ? Math.min(1, r.moveTimer / step) : 1,
         timeMs: view.timeMs + r.id * 777,
         skin: SKINS[r.skin],
-        headScale: 1,
+        headScale: r.boss ? 1.6 : 1,
         bulges: [],
         ghost: !lethal,
         glow: rivalGlow(r, view.timeMs),
@@ -327,7 +327,7 @@ export class Renderer3D {
       const z = v.zs[0];
       if (playing && Math.abs(x - hx) + Math.abs(z - hz) < 30) {
         const kind = r.ally ? 'ally' : !lethal ? 'calm' : r.snake.length <= game.snake.length || game.isEdible(r) ? 'prey' : 'threat';
-        const icon = r.ally ? '🤝 ' : r.markedMs > 0 ? '👑 ' : r.frozenMs > 0 ? '❄️ ' : r.burnMs > 0 ? '🔥 ' : kind === 'threat' ? '⚠ ' : '';
+        const icon = r.ally ? '🤝 ' : r.boss ? '👹 ' : r.markedMs > 0 ? '👑 ' : r.frozenMs > 0 ? '❄️ ' : r.burnMs > 0 ? '🔥 ' : kind === 'threat' ? '⚠ ' : '';
         tags.push({ at: this.project(x, 1.15, z), text: `${icon}${r.snake.length}`, kind });
       }
     }

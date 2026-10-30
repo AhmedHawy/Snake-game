@@ -395,9 +395,11 @@ export class Screens {
           (v) => this.host.updateSettings({ boardSize: v }),
         ),
         h('div', { class: 'row col' }, h('span', { class: 'row-head' }, h('span', { text: t('settings.volume') }), volLabel), slider),
-        this.toggle('settings.mute', s.muted, (v) => this.host.updateSettings({ muted: v })),
+        // "Sound" on = not muted.
+        this.toggle('settings.sound', !s.muted, (v) => this.host.updateSettings({ muted: !v })),
         this.toggle('settings.haptics', s.haptics, (v) => this.host.updateSettings({ haptics: v })),
         this.toggle('settings.dpad', s.dpad, (v) => this.host.updateSettings({ dpad: v })),
+        this.toggle('settings.dpadOverlay', s.dpadOverlay, (v) => this.host.updateSettings({ dpadOverlay: v })),
         this.segmented<'left' | 'right'>(
           'settings.dpadSide',
           [['left', t('settings.left')], ['right', t('settings.right')]],

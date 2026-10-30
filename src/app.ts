@@ -232,7 +232,7 @@ export class App implements UiHost {
       this.hud.setMuted(this.settings.muted);
     }
     if (patch.haptics !== undefined) setHapticsEnabled(this.settings.haptics);
-    if (patch.dpad !== undefined || patch.dpadSide !== undefined || patch.boardSize !== undefined) this.onResize();
+    if (patch.dpad !== undefined || patch.dpadSide !== undefined || patch.dpadOverlay !== undefined || patch.boardSize !== undefined) this.onResize();
     if ((patch.mode !== undefined || patch.difficulty !== undefined) && !this.inGame) this.newGame();
   }
 
@@ -320,14 +320,15 @@ export class App implements UiHost {
     const h = window.innerHeight;
     const tablet = isTablet(w, h);
     // Short landscape phones get a single-row HUD so the board keeps its height.
-    const hudH = h < 500 ? 52 : tablet ? 92 : 84;
+    // One HUD row (the zone name only shows in the zone banner).
+    const hudH = h < 500 ? 52 : tablet ? 64 : 58;
     const dpadSize = Math.round(Math.min(tablet ? 200 : 156, Math.min(w, h) * 0.42));
     this.layout = computeLayout({
       width: w,
       height: h,
       safe: readSafeArea(),
       hudHeight: hudH,
-      dpad: this.settings.dpad ? { side: this.settings.dpadSide, size: dpadSize } : null,
+      dpad: this.settings.dpad ? { side: this.settings.dpadSide, size: dpadSize, overlay: this.settings.dpadOverlay } : null,
       dpr: this.dpr,
     });
     document.documentElement.style.setProperty('--hud-h', `${hudH}px`);
@@ -346,10 +347,11 @@ export class App implements UiHost {
     root.setProperty('--board-x', `${a.x}px`);
     root.setProperty('--board-w', `${a.w}px`);
     root.setProperty('--board-cy', `${a.y + a.h / 2}px`);
+    root.setProperty('--board-bottom', `${a.y + a.h}px`);
   }
 
   private syncDpad(): void {
-    this.dpad.place(this.layout.dpadRect, this.inGame && this.settings.dpad);
+    this.dpad.place(this.layout.dpadRect, this.inGame && this.settings.dpad, this.settings.dpadOverlay);
     // The ability button sits in the board corner away from the D-pad.
     this.abilityBtn.place(this.layout.area, this.settings.dpad && this.settings.dpadSide === 'right' ? 'left' : 'right');
     this.abilityBtn.show(this.inGame);

@@ -18,8 +18,11 @@ export interface LayoutInput {
   safe: Insets;
   /** Height reserved for the HUD bar (CSS px, excluding safe area). */
   hudHeight: number;
-  /** Space reserved for the on-screen D-pad, or null when disabled. */
-  dpad: { side: 'left' | 'right'; size: number } | null;
+  /**
+   * The on-screen D-pad, or null when disabled. `overlay`: drawn over the
+   * board's bottom corner instead of taking space from it.
+   */
+  dpad: { side: 'left' | 'right'; size: number; overlay?: boolean } | null;
   dpr: number;
 }
 
@@ -55,7 +58,10 @@ export function computeLayout(input: LayoutInput): BoardLayout {
   let dpadRect: Rect | null = null;
   let dpadBeside = false;
 
-  if (dpad) {
+  if (dpad?.overlay) {
+    const m = PADDING * 2;
+    dpadRect = { x: dpad.side === 'left' ? x + m : x + w - dpad.size - m, y: y + h - dpad.size - m, w: dpad.size, h: dpad.size };
+  } else if (dpad) {
     const landscape = w > h;
     if (landscape) {
       dpadBeside = true;

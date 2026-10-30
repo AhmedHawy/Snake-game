@@ -44,9 +44,10 @@ export class DPad {
     );
   }
 
-  place(rect: Rect | null, visible: boolean): void {
+  place(rect: Rect | null, visible: boolean, overlay = false): void {
     const show = visible && !!rect;
     this.root.classList.toggle('hidden', !show);
+    this.root.classList.toggle('overlay', overlay);
     if (!show || !rect) return;
     Object.assign(this.root.style, {
       left: `${rect.x}px`,

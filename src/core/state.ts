@@ -152,7 +152,9 @@ export const SPRINT_MS = 1500;
 export const SPRINT_MAX_MS = 3000;
 export const SPRINT_FACTOR = 1.4;
 /** Breath charges the player can store (one per meal). */
-export const MAX_CHARGES = 3;
+export const MAX_CHARGES = 5;
+/** Pause between automatic breaths at a bigger rival (ms). */
+export const AUTO_FIRE_GAP_MS = 700;
 /** Points for each obstacle cell broken by a breath. */
 const SMASH_POINTS = 5;
 
@@ -244,6 +246,8 @@ export class Game {
   charges = 1;
   /** The next fired breath is a super breath (golden star). */
   strongCharge = false;
+  /** Time until the next automatic breath may fire (ms). */
+  autoFireMs = 0;
   /** Player skin (rivals avoid wearing the same one). */
   playerSkin: SkinId = 'classic';
   /** Dragon level (1..5) and the breath it gives. */
@@ -417,6 +421,22 @@ export class Game {
       this.step();
     }
     this.updateRivals(dt);
+    this.autoFire(dt);
+  }
+
+  /**
+   * Rivals mode: when a rival longer than the player (and not frozen or
+   * crowned) is in reach of the breath, a stored charge fires by itself, and
+   * keeps firing every AUTO_FIRE_GAP_MS until that rival is beatable.
+   */
+  private autoFire(dt: number): void {
+    if (this.autoFireMs > 0) this.autoFireMs = Math.max(0, this.autoFireMs - dt);
+    if (this.status !== 'playing' || this.mode.rivals !== 'lethal' || this.charges <= 0 || this.autoFireMs > 0) return;
+    const ab = this.ability;
+    const { hit } = this.breathTargets(ab, this.strongCharge, this.head, this.breathCells(ab, this.strongCharge));
+    if (!hit.some((r) => r.snake.length > this.snake.length && !this.isEdible(r))) return;
+    this.fireBreath();
+    this.autoFireMs = AUTO_FIRE_GAP_MS;
   }
 
   /** Called by the app once the crash animation finishes. */

@@ -3,7 +3,7 @@ import { DIFFICULTIES } from '../src/config/difficulty';
 import { MODES } from '../src/config/modes';
 import type { SkinId } from '../src/config/skins';
 import { cellKey } from '../src/core/spawn';
-import { Game, WAVE_DELAY_MS, type Rival } from '../src/core/state';
+import { AUTO_FIRE_GAP_MS, Game, MAX_CHARGES, WAVE_DELAY_MS, type Rival } from '../src/core/state';
 import type { Vec } from '../src/core/types';
 
 function stepOnce(g: Game): void {
@@ -87,6 +87,8 @@ describe('dragon breath', () => {
   it('lava leaves burning ground behind', () => {
     const { g } = setup('lava', 10);
     g.fireBreath();
+    g.foods.length = 0; // no new charge, so no automatic breath refreshes the lava
+    g.steer(3); // turn away instead of running into the (longer) rival
     expect(g.hazards.size).toBeGreaterThan(0);
     for (let i = 0; i < 3100; i++) g.update(1);
     expect(g.hazards.size).toBe(0);
@@ -115,13 +117,14 @@ describe('dragon breath', () => {
 
 describe('breath charges', () => {
   it('eating only shows off the breath and stores a charge; firing spends it', () => {
-    const { g, r } = setup('dragon', 10);
+    // A shorter rival: no automatic breath.
+    const { g, r } = setup('dragon', 6);
     expect(g.charges).toBe(1);
     stepOnce(g); // eats the apple
     const shows = g.events.filter((e) => e.type === 'breath');
     expect(shows.length).toBe(1);
     expect(shows[0].type === 'breath' && shows[0].real).toBe(false);
-    expect(r.snake.length).toBe(10);
+    expect(r.snake.length).toBe(6);
     expect(r.burnMs).toBe(0);
     expect(g.charges).toBe(2);
     expect(g.fireBreath()).toBe(true);
@@ -130,24 +133,75 @@ describe('breath charges', () => {
     expect(g.charges).toBe(0);
   });
 
-  it('stores at most 3 charges; a golden star makes the next one a super breath', () => {
+  it('stores at most 5 charges; a golden star makes the next one a super breath', () => {
     const g = new Game({ mode: MODES.zen, difficulty: DIFFICULTIES.easy, seed: 2 });
     g.begin();
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       g.foods.length = 0;
-      const f = g.spawnFood(i === 4 ? 'golden' : 'apple')!;
+      const f = g.spawnFood(i === 6 ? 'golden' : 'apple')!;
       const d = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }][g.dir];
       f.pos = { x: g.head.x + d.x, y: g.head.y + d.y };
       f.prev = { ...f.pos };
       stepOnce(g);
     }
-    expect(g.charges).toBe(3);
+    expect(g.charges).toBe(MAX_CHARGES);
+    expect(MAX_CHARGES).toBe(5);
     expect(g.strongCharge).toBe(true);
     g.events.length = 0;
     g.fireBreath();
     const e = g.events.find((ev) => ev.type === 'breath');
     expect(e && e.type === 'breath' && e.strong && e.real).toBe(true);
     expect(g.strongCharge).toBe(false);
+  });
+});
+
+describe('auto breath', () => {
+  it('fires by itself at a longer rival in reach, again and again until it is beatable', () => {
+    // Player (8) heading up; a longer rival (14) lies across y = -3, inside the fire cone.
+    const { g, r } = setup('dragon', 14);
+    g.foods.length = 0;
+    g.charges = 5;
+    g.steer(3); // turn away after the first step so the player doesn't run into it
+    g.update(1);
+    expect(g.charges).toBe(4); // first automatic breath
+    expect(r.snake.length).toBeLessThan(14);
+    // Within the gap: no second shot yet.
+    g.update(AUTO_FIRE_GAP_MS / 2);
+    expect(g.charges).toBe(4);
+  });
+
+  it('keeps firing while the rival is still longer', () => {
+    const g = new Game({ mode: MODES.rivals, difficulty: DIFFICULTIES.easy, seed: 4, playerSkin: 'dragon' });
+    g.world.clear();
+    g.foods.length = 0;
+    g.setSnake(Array.from({ length: 8 }, (_, i) => ({ x: 0, y: i })));
+    g.dir = 0;
+    const [r, ...others] = g.rivals;
+    for (const o of others) {
+      o.alive = false;
+      o.dead = true;
+      o.cells.clear();
+    }
+    putRival(r, Array.from({ length: 16 }, (_, i) => ({ x: 2 - i, y: -3 })));
+    g.charges = 5;
+    g.begin();
+    // Fire repeatedly without moving the player.
+    for (let k = 0; k < 4; k++) {
+      (g as unknown as { autoFire(dt: number): void }).autoFire(AUTO_FIRE_GAP_MS);
+    }
+    expect(g.charges).toBeLessThan(4);
+    expect(r.snake.length <= g.snake.length || !r.alive).toBe(true);
+  });
+
+  it('does not fire at rivals that are shorter or harmless (Zen)', () => {
+    const { g } = setup('dragon', 5);
+    g.charges = 5;
+    g.update(1);
+    expect(g.charges).toBe(5);
+    const z = setup('dragon', 14, 8, 'zen');
+    z.g.charges = 5;
+    z.g.update(1);
+    expect(z.g.charges).toBe(5);
   });
 });
 
